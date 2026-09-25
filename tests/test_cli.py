@@ -1,0 +1,109 @@
+import json
+from pathlib import Path
+
+from muse.cli import main
+from muse.config import MANAGED_AREAS, MASTER_SHELVES
+
+
+def make_layout(root: Path) -> None:
+    for area in MANAGED_AREAS:
+        (root / area).mkdir(parents=True)
+    for shelf in MASTER_SHELVES:
+        (root / "master" / shelf).mkdir()
+
+
+def test_bare_muse_prints_help_and_succeeds(capsys) -> None:
+    result = main([])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "Usage:" in output
+    assert "doctor" in output
+    assert "stats" in output
+    assert "\n  COMMAND\n" not in output
+
+
+def test_help_honors_explicit_color_policy(capsys) -> None:
+    assert main(["--color", "always"]) == 0
+    colored = capsys.readouterr().out
+    assert "\x1b[" in colored
+    assert "doctor" in colored
+
+    assert main(["--color", "never"]) == 0
+    plain = capsys.readouterr().out
+    assert "\x1b[" not in plain
+
+
+def test_status_json_reports_layout_without_creating_state(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    before = sorted(root.rglob("*"))
+
+    result = main(["--root", str(root), "status", "--json"])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["root"] == str(root)
+    assert all(area["status"] == "ok" for area in report["areas"])
+    assert report["state_created"] is False
+    assert sorted(root.rglob("*")) == before
+
+
+def test_status_uses_semantic_color_when_forced(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+
+    result = main(["--root", str(root), "--color", "always", "status"])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "\x1b[" in output
+    assert "OK" in output
+
+
+def test_status_fails_when_layout_is_incomplete(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    root.mkdir()
+
+    result = main(["--root", str(root), "status", "--json"])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 1
+    assert any(area["status"] == "error" for area in report["areas"])
+
+
+def test_stats_is_read_only_and_classifies_audio(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    (root / "backlog" / "song.mp3").write_bytes(b"1234")
+    before = sorted(root.rglob("*"))
+
+    result = main(["--root", str(root), "stats", "--json"])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["total"]["files"] == 1
+    assert report["total"]["audio_files"] == 1
+    assert report["areas"]["backlog"]["logical_bytes"] == 4
+    assert report["state_created"] is False
+    assert sorted(root.rglob("*")) == before
+
+
+def test_relative_stats_target_is_beneath_root(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+
+    result = main(["--root", str(root), "stats", "backlog", "--json"])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["target"] == str(root / "backlog")
+
+
+def test_planned_command_fails_explicitly(tmp_path: Path, capsys) -> None:
+    result = main(["--root", str(tmp_path), "backlog", "scan"])
+
+    captured = capsys.readouterr()
+    assert result == 2
+    assert "not implemented yet" in captured.err.lower()
+    assert "no changes were made" in captured.err
