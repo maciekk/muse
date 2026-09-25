@@ -492,10 +492,16 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
             terminal_output = sys.stdout.isatty()
             path_width = max(24, console.width - 48)
 
-            def paths(group: DuplicateGroup) -> list[str] | tuple[str, ...]:
+            def file_and_paths(group: DuplicateGroup) -> list[str]:
+                file_paths = [Path(path) for path in group.paths]
+                filenames = {path.name for path in file_paths}
+                if len(filenames) != 1:
+                    paths = list(group.paths)
+                else:
+                    paths = [file_paths[0].name, *(str(path.parent) for path in file_paths)]
                 if terminal_output:
-                    return [middle_truncate(path, path_width) for path in group.paths]
-                return group.paths
+                    return [middle_truncate(path, path_width) for path in paths]
+                return paths
 
             rows = [
                 (
@@ -503,7 +509,7 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
                     human_number(len(group.paths)),
                     human_bytes(group.size),
                     human_bytes(group.logical_repeated_bytes),
-                    "\n".join(paths(group)),
+                    "\n".join(file_and_paths(group)),
                 )
                 for group in report.groups
             ]

@@ -107,6 +107,23 @@ def test_dupes_reports_exact_files_and_persists_hashes(tmp_path: Path, capsys) -
     assert (root / ".muse" / "muse.db").is_file()
 
 
+def test_dupes_shows_shared_filename_once_with_its_directories(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    (root / "backlog" / "first").mkdir()
+    (root / "backlog" / "second").mkdir()
+    (root / "backlog" / "first" / "song.flac").write_bytes(b"same")
+    (root / "backlog" / "second" / "song.flac").write_bytes(b"same")
+
+    result = main(["--root", str(root), "--color", "never", "dupes", "backlog"])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert output.count("song.flac") == 1
+    assert "first" in output
+    assert "second" in output
+
+
 def test_relative_stats_target_is_beneath_root(tmp_path: Path, capsys) -> None:
     root = tmp_path / "music-vault"
     make_layout(root)
