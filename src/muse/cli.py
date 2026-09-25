@@ -16,7 +16,14 @@ from rich_argparse import RichHelpFormatter
 
 from muse import __version__
 from muse.config import MANAGED_AREAS, MASTER_SHELVES, resolve_root, resolve_target
-from muse.reporting import emit_json, human_bytes, make_console, print_table, status_text
+from muse.reporting import (
+    emit_json,
+    human_bytes,
+    human_number,
+    make_console,
+    print_table,
+    status_text,
+)
 from muse.repository import PathStats, scan_path, scan_root_by_area
 
 
@@ -212,14 +219,14 @@ def _stats_row(name: str, stats: PathStats) -> tuple[str, ...]:
     allocated = stats.allocated_bytes if stats.allocated_bytes_available else None
     return (
         name,
-        str(stats.files),
-        str(stats.audio_files),
-        str(stats.non_audio_files),
-        str(stats.directories),
-        str(stats.symlinks),
+        human_number(stats.files),
+        human_number(stats.audio_files),
+        human_number(stats.non_audio_files),
+        human_number(stats.directories),
+        human_number(stats.symlinks),
         human_bytes(stats.logical_bytes),
         human_bytes(allocated),
-        str(len(stats.errors)),
+        human_number(len(stats.errors)),
     )
 
 
@@ -275,7 +282,7 @@ def _stats(args: argparse.Namespace, root: Path) -> int:
         if total.extensions:
             console.print("[bold]Extensions[/bold]")
             extension_rows = [
-                (extension, str(count))
+                (extension, human_number(count))
                 for extension, count in sorted(
                     total.extensions.items(), key=lambda item: (-item[1], item[0])
                 )

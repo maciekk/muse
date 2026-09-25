@@ -30,6 +30,11 @@ def emit_json(value: Any) -> None:
     sys.stdout.write("\n")
 
 
+def human_number(value: int) -> str:
+    """Format an integer for human-readable output."""
+    return f"{value:,}"
+
+
 def human_bytes(value: int | None) -> str:
     if value is None:
         return "n/a"
