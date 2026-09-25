@@ -1,6 +1,16 @@
 # Muse
 
-Muse is a CLI for curating a canonical music archive and publishing selected music to Apple Music. The initial implementation is intentionally read-only.
+Muse is a CLI for curating a canonical music archive and publishing selected music to Apple Music. The initial implementation is intentionally conservative: inspection is read-only, while reusable operational metadata is kept under `.muse/`.
+
+## Design principles
+
+- Preserve source material. Destructive operations must be explicit, previewable, conservative, and recoverable.
+- Keep expensive work observable. Slow operations identify their current phase and, when possible, show measurable progress and an ETA.
+- Keep expensive work reusable and resumable. Checksums and other derived facts are persisted rather than discarded, with source metadata used to identify stale results.
+- Report meaningful efficiency statistics. Elapsed time, phase timings, bytes read, throughput, and cache effectiveness are part of the product rather than debugging trivia.
+- Optimize physical work, not merely command count. Avoid unnecessary disk reads and expose both file-based and byte-based measurements.
+- Never silently move substantial work into the background. Future detached jobs will be explicit, inspectable, cancellable, and safe to resume.
+- Preserve clean interfaces. Progress belongs on stderr; structured results on stdout remain suitable for scripts and pipes.
 
 ## Library root
 
@@ -27,15 +37,20 @@ Muse never scans the OS-managed `~/Music/` directory by default.
 ## Current commands
 
 ```bash
-muse                 # show styled help
-muse doctor          # inspect layout and supporting tools
-muse status          # show top-level repository status
-muse stats           # count files and disk usage
-muse stats backlog   # inspect one path beneath the root
+muse                       # show styled help
+muse doctor                # inspect layout and supporting tools
+muse status                # show top-level repository status
+muse stats                 # count files and disk usage
+muse stats backlog         # inspect one path beneath the root
 muse stats --json
+muse dupes                 # find exact duplicates across the library
+muse dupes backlog         # inspect one path beneath the root
+muse dupes --rehash        # bypass the persistent hash cache
+muse dupes --progress always
+muse dupes --json
 ```
 
-`doctor`, `status`, and `stats` do not modify the repository or create Muse state. Planned command groups are visible in `muse --help`, but return an explicit “not implemented” error.
+`doctor`, `status`, and `stats` do not modify the repository or create Muse state. `dupes` never changes music files, but stores SHA-256 hashes and file size/modification-time metadata in `.muse/muse.db`; unchanged files reuse their cached hashes on later runs. Files with a size that occurs only once cannot be exact duplicates and are not hashed by this command. Use `--rehash` to bypass cached hashes for duplicate candidates. Planned command groups are visible in `muse --help`, but return an explicit “not implemented” error.
 
 ## Terminal output
 
@@ -48,7 +63,7 @@ muse --color never status
 NO_COLOR=1 muse status
 ```
 
-Machine-readable JSON never contains terminal styling.
+Machine-readable JSON never contains terminal styling. Potentially slow operations delay their progress display to avoid flicker for quick work, but show it immediately when preflight identifies a large workload. Progress is written to stderr and can be controlled with `--progress auto|always|never`.
 
 ## Installation
 

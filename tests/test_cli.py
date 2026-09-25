@@ -89,6 +89,24 @@ def test_stats_is_read_only_and_classifies_audio(tmp_path: Path, capsys) -> None
     assert sorted(root.rglob("*")) == before
 
 
+def test_dupes_reports_exact_files_and_persists_hashes(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    (root / "backlog" / "one.flac").write_bytes(b"same")
+    (root / "backlog" / "two.flac").write_bytes(b"same")
+
+    result = main(["--root", str(root), "dupes", "backlog", "--json"])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["files"] == 2
+    assert report["hashed_files"] == 2
+    assert report["duplicate_groups"] == 1
+    assert report["redundant_occurrences"] == 1
+    assert report["groups"][0]["files"] == ["one.flac", "two.flac"]
+    assert (root / ".muse" / "muse.db").is_file()
+
+
 def test_relative_stats_target_is_beneath_root(tmp_path: Path, capsys) -> None:
     root = tmp_path / "music-vault"
     make_layout(root)

@@ -10,17 +10,29 @@ import sys
 from collections.abc import Sequence
 from functools import partial
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
 from rich_argparse import RichHelpFormatter
 
 from muse import __version__
 from muse.config import MANAGED_AREAS, MASTER_SHELVES, resolve_root, resolve_target
+from muse.duplicates import DuplicateGroup, DuplicateReport, ProgressUpdate, find_duplicates
 from muse.reporting import (
     emit_json,
     human_bytes,
+    human_duration,
     human_number,
     make_console,
+    middle_truncate,
     print_table,
     status_text,
 )
@@ -50,7 +62,7 @@ PLANNED_COMMANDS = {
     "backlog": ("add", "scan", "status", "overlap", "unique", "browse", "verify", "compact"),
     "integrity": ("scan", "status", "verify", "inspect", "accept"),
     "stopgap": ("add", "status", "publish"),
-    "apple": ("status", "diff", "sync", "duplicates", "report", "query"),
+    "apple": ("status", "diff", "sync", "dupes", "report", "query"),
     "publish": ("apple",),
 }
 
@@ -102,6 +114,28 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     )
     _add_json_argument(stats)
     stats.set_defaults(handler=_stats)
+
+    dupes = commands.add_parser(
+        "dupes", help="find exact duplicate files using cached SHA-256 hashes"
+    )
+    dupes.add_argument(
+        "target",
+        nargs="?",
+        help="path to inspect; relative paths are resolved beneath the library root",
+    )
+    dupes.add_argument(
+        "--rehash",
+        action="store_true",
+        help="recompute every hash instead of using unchanged cached entries",
+    )
+    dupes.add_argument(
+        "--progress",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="progress display policy (default: auto)",
+    )
+    _add_json_argument(dupes)
+    dupes.set_defaults(handler=_dupes)
 
     for name, actions in PLANNED_COMMANDS.items():
         planned = commands.add_parser(name, help=f"planned {name} operations (not implemented)")
@@ -303,6 +337,195 @@ def _stats(args: argparse.Namespace, root: Path) -> int:
         console.print("[dim]Read-only scan; no Muse state was created or changed.[/dim]")
 
     return 1 if total.errors else 0
+
+
+class _DuplicateProgressDisplay:
+    """Delayed terminal progress for duplicate scans."""
+
+    _DELAY_SECONDS = 2.0
+    _LONG_BYTES = 1024**3
+    _LONG_FILES = 1_000
+
+    def __init__(self, mode: str, color: str) -> None:
+        self.console = make_console(color, stderr=True)
+        self.enabled = mode == "always" or (mode == "auto" and sys.stderr.isatty())
+        self.immediate = mode == "always"
+        self.started_at = monotonic()
+        self.phase: str | None = None
+        self.task_id: int | None = None
+        self.progress = Progress(
+            SpinnerColumn(),
+            TextColumn("{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            console=self.console,
+            transient=True,
+        )
+        self.running = False
+
+    def _should_start(self, update: ProgressUpdate) -> bool:
+        predicted_long = update.phase == "hashing" and (
+            (update.total_bytes or 0) >= self._LONG_BYTES
+            or (update.total_files or 0) >= self._LONG_FILES
+        )
+        return (
+            self.immediate
+            or predicted_long
+            or monotonic() - self.started_at >= self._DELAY_SECONDS
+        )
+
+    def _description(self, update: ProgressUpdate) -> str:
+        if update.phase == "inventory":
+            return (
+                f"Inventorying files — {human_number(update.completed_files)} files, "
+                f"{human_bytes(update.completed_bytes)}"
+            )
+        if update.phase == "hashing":
+            total_files = human_number(update.total_files or 0)
+            cache_total = update.cached_files + (update.total_files or 0)
+            cache_rate = update.cached_files / cache_total if cache_total else 0.0
+            return (
+                f"Hashing content — {human_number(update.completed_files)}/{total_files} files, "
+                f"{human_bytes(update.completed_bytes)}/{human_bytes(update.total_bytes or 0)}, "
+                f"cache {cache_rate:.1%}"
+            )
+        return (
+            f"Analyzing hashes — {human_number(update.completed_files)}/"
+            f"{human_number(update.total_files or 0)}"
+        )
+
+    def update(self, update: ProgressUpdate) -> None:
+        if not self.enabled or update.phase == "complete":
+            return
+        if not self.running:
+            if not self._should_start(update):
+                return
+            self.progress.start()
+            self.running = True
+
+        if update.phase != self.phase:
+            if self.task_id is not None:
+                self.progress.remove_task(self.task_id)
+            total = update.total_bytes if update.phase == "hashing" else update.total_files
+            self.task_id = self.progress.add_task(self._description(update), total=total)
+            self.phase = update.phase
+
+        if self.task_id is None:
+            return
+        completed = (
+            update.completed_bytes if update.phase == "hashing" else update.completed_files
+        )
+        self.progress.update(
+            self.task_id,
+            description=self._description(update),
+            completed=completed,
+            total=update.total_bytes if update.phase == "hashing" else update.total_files,
+        )
+
+    def stop(self) -> None:
+        if self.running:
+            self.progress.stop()
+            self.running = False
+
+
+def _duplicate_summary_rows(report: DuplicateReport) -> list[tuple[str, str]]:
+    return [
+        ("Elapsed", human_duration(report.elapsed_seconds)),
+        ("Files examined", human_number(report.files)),
+        ("Logical size", human_bytes(report.logical_bytes)),
+        (
+            "Hash candidates",
+            f"{human_number(report.hash_candidate_files)} · "
+            f"{human_bytes(report.hash_candidate_bytes)}",
+        ),
+        (
+            "Hash cache",
+            f"{human_number(report.hashed_files)} computed · "
+            f"{human_number(report.cached_files)} reused",
+        ),
+        (
+            "Cache hit rate",
+            f"{report.cache_hit_rate:.1%} files · {report.byte_cache_hit_rate:.1%} bytes",
+        ),
+        (
+            "Data read",
+            f"{human_bytes(report.bytes_read)} · "
+            f"{human_bytes(round(report.hash_throughput))}/s",
+        ),
+        ("Duplicate groups", human_number(len(report.groups))),
+        ("Redundant copies", human_number(report.redundant_occurrences)),
+        ("Logical repeated bytes", human_bytes(report.logical_repeated_bytes)),
+        ("Errors", human_number(len(report.errors))),
+    ]
+
+
+def _dupes(args: argparse.Namespace, root: Path) -> int:
+    target = resolve_target(root, args.target)
+    progress = _DuplicateProgressDisplay(args.progress, args.color)
+    try:
+        report = find_duplicates(
+            target,
+            root / ".muse" / "muse.db",
+            rehash=args.rehash,
+            progress=progress.update,
+        )
+    finally:
+        progress.stop()
+
+    if args.json:
+        emit_json(report.to_dict())
+    else:
+        console = make_console(args.color)
+        console.print("[bold]Exact duplicate files[/bold]")
+        console.print("[dim]Target[/dim]", str(target))
+        console.print("[dim]Hash cache[/dim]", report.database, "\n")
+        print_table(
+            console,
+            ("METRIC", "VALUE"),
+            _duplicate_summary_rows(report),
+            right_aligned=frozenset({"VALUE"}),
+        )
+
+        if report.groups:
+            console.print("[bold]Duplicate groups[/bold]")
+            terminal_output = sys.stdout.isatty()
+            path_width = max(24, console.width - 48)
+
+            def paths(group: DuplicateGroup) -> list[str] | tuple[str, ...]:
+                if terminal_output:
+                    return [middle_truncate(path, path_width) for path in group.paths]
+                return group.paths
+
+            rows = [
+                (
+                    group.sha256[:12],
+                    human_number(len(group.paths)),
+                    human_bytes(group.size),
+                    human_bytes(group.logical_repeated_bytes),
+                    "\n".join(paths(group)),
+                )
+                for group in report.groups
+            ]
+            print_table(
+                console,
+                ("SHA-256", "COPIES", "EACH", "REPEATED", "FILES"),
+                rows,
+                right_aligned=frozenset({"COPIES", "EACH", "REPEATED"}),
+                column_widths={"FILES": path_width} if terminal_output else None,
+            )
+
+        if report.errors:
+            error_console = make_console(args.color, stderr=True)
+            error_console.print("[bold red]Hash errors[/bold red]")
+            for error in report.errors:
+                error_console.print(f"  [red]{error.path}:[/red] {error.message}")
+
+        console.print(
+            "[dim]Music files were not changed; reusable hashes were stored in .muse/muse.db.[/dim]"
+        )
+
+    return 1 if report.errors else 0
 
 
 def _not_implemented(args: argparse.Namespace, root: Path) -> int:

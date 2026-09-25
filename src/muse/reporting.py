@@ -35,6 +35,30 @@ def human_number(value: int) -> str:
     return f"{value:,}"
 
 
+def middle_truncate(value: str, width: int) -> str:
+    """Shorten text while retaining its beginning and end."""
+    if len(value) <= width:
+        return value
+    if width <= 1:
+        return "…"[:width]
+    front = (width - 1) // 2
+    return f"{value[:front]}…{value[-(width - front - 1):]}"
+
+
+def human_duration(seconds: float) -> str:
+    """Format elapsed time compactly while preserving useful precision."""
+    if seconds < 10:
+        return f"{seconds:.2f}s"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    total_seconds = round(seconds)
+    minutes, remaining_seconds = divmod(total_seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {remaining_seconds:02d}s"
+    hours, remaining_minutes = divmod(minutes, 60)
+    return f"{hours}h {remaining_minutes:02d}m {remaining_seconds:02d}s"
+
+
 def human_bytes(value: int | None) -> str:
     if value is None:
         return "n/a"
@@ -67,6 +91,7 @@ def print_table(
     *,
     right_aligned: frozenset[str] = frozenset(),
     bold_rows: frozenset[str] = frozenset(),
+    column_widths: dict[str, int] | None = None,
 ) -> None:
     """Print a restrained table intended for routine terminal use."""
     table = Table(box=box.SIMPLE_HEAD, show_edge=False, pad_edge=False)
@@ -77,6 +102,7 @@ def print_table(
             justify="right" if header in right_aligned else "left",
             no_wrap=header in right_aligned or header in {"AREA", "STATUS", "TOOL"},
             min_width=len(header),
+            width=column_widths.get(header) if column_widths else None,
         )
 
     for row in rows:
