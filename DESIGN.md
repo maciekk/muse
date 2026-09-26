@@ -577,8 +577,6 @@ Each slice should include tests for:
 
 Tests should use explicit failpoints around durable writes, renames, verified copies, and source removal so power-loss recovery is exercised deterministically.
 
-## Other future work
+## External source assessment
 
-Previously identified work remains useful but is separate from import:
-
-- `muse scan DIR` to compare an external prospective source against the vault before adding it to backlog.
+`muse scan DIR` compares a prospective external source with every vault content area before it is added to `backlog/`. The default read-only pass uses case-insensitive filenames and sizes as a cheap heuristic; `--thorough` verifies SHA-256 content checksums regardless of names or paths. Reports summarize apparent coverage and characterize files not found in the vault by location, type, size, and audio status.

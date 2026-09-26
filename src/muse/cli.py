@@ -46,6 +46,7 @@ from muse.reporting import (
     status_text,
 )
 from muse.repository import PathStats, scan_path, scan_root_by_area
+from muse.scanning import ScanComparison, compare_with_vault
 from muse.search import search_vault
 from muse.slag import apply as apply_slag
 from muse.slag import candidates as slag_candidates
@@ -138,6 +139,19 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     )
     _add_json_argument(stats)
     stats.set_defaults(handler=_stats)
+
+    scan = commands.add_parser(
+        "scan", help="check whether an external tree contains files absent from the vault"
+    )
+    scan.add_argument("target", help="external file or directory to inspect")
+    scan.add_argument(
+        "--thorough",
+        action="store_true",
+        help="compare SHA-256 checksums instead of filenames and sizes",
+    )
+    _add_max_threads_argument(scan)
+    _add_json_argument(scan)
+    scan.set_defaults(handler=_scan)
 
     search = commands.add_parser(
         "search", help="find files or directories by name across the vault"
@@ -508,6 +522,122 @@ def _stats(args: argparse.Namespace, root: Path) -> int:
         console.print("[dim]Read-only scan; no Muse state was created or changed.[/dim]")
 
     return 1 if total.errors else 0
+
+
+def _scan_summary_rows(report: ScanComparison) -> list[tuple[str, str, str]]:
+    return [
+        (
+            "Target",
+            human_number(report.target_files),
+            human_bytes(report.target_bytes),
+        ),
+        (
+            "Already in vault" if report.mode == "thorough" else "Likely in vault",
+            human_number(report.present_files),
+            human_bytes(report.present_bytes),
+        ),
+        (
+            "Not found in vault",
+            human_number(len(report.new_files)),
+            human_bytes(report.new_bytes),
+        ),
+    ]
+
+
+def _scan(args: argparse.Namespace, root: Path) -> int:
+    # Unlike vault-scoped commands, scan's relative target is an ordinary path
+    # relative to the caller: its main purpose is inspecting external media.
+    target = Path(args.target).expanduser().absolute()
+    report = compare_with_vault(
+        root, target, thorough=args.thorough, max_threads=args.max_threads
+    )
+    if args.json:
+        emit_json(report.to_dict())
+        return 1 if report.errors else 0
+
+    console = make_console(args.color)
+    console.print("[bold]External source scan[/bold]")
+    console.print("[dim]Target[/dim]", str(target))
+    console.print(
+        "[dim]Comparison[/dim]",
+        "SHA-256 content checksums" if args.thorough else "case-insensitive filename + size",
+        "\n",
+    )
+    print_table(
+        console,
+        ("CATEGORY", "FILES", "LOGICAL"),
+        _scan_summary_rows(report),
+        right_aligned=frozenset({"FILES", "LOGICAL"}),
+    )
+
+    if report.new_files:
+        console.print("[bold]Where the not-found files are[/bold]")
+        print_table(
+            console,
+            ("TOP-LEVEL PATH", "FILES", "LOGICAL"),
+            [
+                (name, human_number(count), human_bytes(report.top_level_bytes[name]))
+                for name, count in report.top_level.most_common(15)
+            ],
+            right_aligned=frozenset({"FILES", "LOGICAL"}),
+        )
+        console.print("[bold]Not-found file types[/bold]")
+        print_table(
+            console,
+            ("EXTENSION", "FILES"),
+            [
+                (extension, human_number(count))
+                for extension, count in report.extensions.most_common()
+            ],
+            right_aligned=frozenset({"FILES"}),
+        )
+        console.print("[bold]Largest not-found files[/bold]")
+        shown = sorted(
+            report.new_files, key=lambda item: (-item.size, item.relative.casefold())
+        )[:25]
+        print_table(
+            console,
+            ("SIZE", "AUDIO", "PATH"),
+            [
+                (human_bytes(item.size), "yes" if item.audio else "no", item.relative)
+                for item in shown
+            ],
+            right_aligned=frozenset({"SIZE"}),
+        )
+        omitted = len(report.new_files) - len(shown)
+        if omitted:
+            console.print(
+                f"[dim]…and {human_number(omitted)} more; "
+                "use --json for all paths.[/dim]"
+            )
+
+    if report.new_audio_files:
+        audio_noun = "audio file was" if report.new_audio_files == 1 else "audio files were"
+        console.print(
+            f"[bold yellow]Worth reviewing:[/bold yellow] "
+            f"{human_number(report.new_audio_files)} {audio_noun} not found in the vault."
+        )
+    elif report.new_files:
+        console.print(
+            "[bold green]No new audio detected.[/bold green] "
+            "Only non-audio files were not found in the vault."
+        )
+    elif report.target_files:
+        qualifier = "byte-identical copies" if args.thorough else "likely copies"
+        console.print(f"[bold green]Everything has {qualifier} in the vault.[/bold green]")
+    else:
+        console.print("[yellow]No regular files were found on the target.[/yellow]")
+
+    if not args.thorough and report.target_files:
+        console.print(
+            "[dim]Quick results are heuristic. Use --thorough before discarding the source.[/dim]"
+        )
+    if report.errors:
+        error_console = make_console(args.color, stderr=True)
+        error_console.print("[bold red]Scan errors[/bold red]")
+        for error in report.errors:
+            error_console.print(f"  [red]{error.path}:[/red] {error.message}")
+    return 1 if report.errors else 0
 
 
 class _DuplicateProgressDisplay:

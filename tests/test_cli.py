@@ -412,6 +412,27 @@ def test_import_plans_then_applies_audio_only_directory(
     assert (root / "master" / "games" / "new-album" / "song.flac").is_file()
 
 
+def test_scan_json_reports_files_absent_from_all_vault_areas(
+    tmp_path: Path, capsys
+) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    target = tmp_path / "old-drive"
+    target.mkdir()
+    (root / "backlog" / "known.flac").write_bytes(b"known")
+    (target / "known.flac").write_bytes(b"known")
+    (target / "lost.mp3").write_bytes(b"lost")
+
+    result = main(["--root", str(root), "scan", str(target), "--json"])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["mode"] == "quick"
+    assert report["present_in_vault"]["files"] == 1
+    assert report["not_found_in_vault"]["audio_files"] == 1
+    assert report["not_found_in_vault"]["items"][0]["path"] == "lost.mp3"
+
+
 def test_relative_stats_target_is_beneath_root(tmp_path: Path, capsys) -> None:
     root = tmp_path / "music-vault"
     make_layout(root)
