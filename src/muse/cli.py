@@ -46,7 +46,14 @@ from muse.reporting import (
     status_text,
 )
 from muse.repository import AUDIO_EXTENSIONS, PathStats, scan_path, scan_root_by_area
-from muse.scanning import ScanComparison, ScannedFile, ScanProgress, compare_with_vault
+from muse.scanning import (
+    PullProgress,
+    ScanComparison,
+    ScannedFile,
+    ScanProgress,
+    compare_with_vault,
+    pull_new_directories,
+)
 from muse.search import search_vault
 from muse.slag import apply as apply_slag
 from muse.slag import candidates as slag_candidates
@@ -188,6 +195,11 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
         "--all",
         action="store_true",
         help="show every not-found directory and file",
+    )
+    scan.add_argument(
+        "--pull",
+        action="store_true",
+        help="interactively copy directories containing not-found audio into backlog",
     )
     _add_max_threads_argument(scan)
     _add_json_argument(scan)
@@ -692,6 +704,53 @@ class _ScanProgressDisplay:
             self.running = False
 
 
+class _PullProgressDisplay:
+    """Determinate progress bar for copying external content into backlog."""
+
+    def __init__(self, mode: str, color: str) -> None:
+        self.console = make_console(color, stderr=True)
+        self.enabled = mode == "always" or (mode == "auto" and sys.stderr.isatty())
+        self.task_id: int | None = None
+        self.progress = Progress(
+            TextColumn("{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            console=self.console,
+            transient=True,
+        )
+        self.running = False
+
+    def update(self, update: PullProgress) -> None:
+        if not self.enabled:
+            return
+        if update.complete:
+            self.stop()
+            return
+        description = (
+            f"Pulling into backlog — {human_number(update.completed_files)}/"
+            f"{human_number(update.total_files)} files"
+        )
+        if not self.running:
+            self.progress.start()
+            self.task_id = self.progress.add_task(
+                description,
+                total=max(update.total_bytes, 1),
+            )
+            self.running = True
+        elif self.task_id is not None:
+            self.progress.update(
+                self.task_id,
+                completed=update.completed_bytes,
+                description=description,
+            )
+
+    def stop(self) -> None:
+        if self.running:
+            self.progress.stop()
+            self.running = False
+
+
 def _not_found_directory_rows(
     report: ScanComparison, *, show_all: bool = False
 ) -> list[tuple[Any, ...]]:
@@ -729,10 +788,29 @@ def _not_found_directory_rows(
     return rows
 
 
+def _resolve_pull_destination(root: Path, value: str) -> Path:
+    """Resolve an interactive pull destination strictly beneath backlog/."""
+    relative = Path(value.strip())
+    if not value.strip():
+        raise ValueError("a destination is required")
+    if relative.is_absolute():
+        raise ValueError("enter a relative path beneath backlog/")
+    if relative.parts[:1] == ("backlog",):
+        relative = Path(*relative.parts[1:])
+    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError("destination must name a directory below backlog/")
+    return root / "backlog" / relative
+
+
 def _scan(args: argparse.Namespace, root: Path) -> int:
     # Unlike vault-scoped commands, scan's relative target is an ordinary path
     # relative to the caller: its main purpose is inspecting external media.
     target = Path(args.target).expanduser().absolute()
+    if args.pull and args.json:
+        make_console(args.color, stderr=True).print(
+            "[red]Scan refused:[/red] --pull is interactive and cannot be combined with --json"
+        )
+        return 1
     progress = _ScanProgressDisplay(args.progress, args.color)
     try:
         report = compare_with_vault(
@@ -816,6 +894,39 @@ def _scan(args: argparse.Namespace, root: Path) -> int:
         error_console.print("[bold red]Scan errors[/bold red]")
         for error in report.errors:
             error_console.print(f"  [red]{error.path}:[/red] {error.message}")
+
+    if args.pull:
+        if report.errors:
+            make_console(args.color, stderr=True).print(
+                "[red]Pull refused:[/red] resolve scan errors before copying content"
+            )
+            return 1
+        if not report.new_files:
+            console.print("[dim]Nothing was pulled; no not-found audio was detected.[/dim]")
+            return 0
+        try:
+            value = input("Pull into which new directory under backlog/? ")
+            destination = _resolve_pull_destination(root, value)
+            pull_progress = _PullProgressDisplay(args.progress, args.color)
+            try:
+                result = pull_new_directories(
+                    root,
+                    target,
+                    report.new_files,
+                    destination,
+                    pull_progress.update,
+                )
+            finally:
+                pull_progress.stop()
+        except (EOFError, OSError, ValueError) as error:
+            make_console(args.color, stderr=True).print(f"[red]Pull refused:[/red] {error}")
+            return 1
+        relative_destination = result.destination.relative_to(root)
+        console.print(
+            f"[green]Pulled {human_number(len(result.source_directories))} containing "
+            f"director{'y' if len(result.source_directories) == 1 else 'ies'} into "
+            f"{relative_destination}.[/green]"
+        )
     return 1 if report.errors else 0
 
 

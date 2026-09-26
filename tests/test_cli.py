@@ -561,6 +561,69 @@ def test_scan_all_lists_every_not_found_file(tmp_path: Path, capsys) -> None:
     assert "…and 1 more" not in all_output
 
 
+def test_scan_pull_copies_whole_containing_directories_into_prompted_backlog_path(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    target = tmp_path / "old-drive"
+    album = target / "Albums" / "Live"
+    album.mkdir(parents=True)
+    unrelated = target / "Documents"
+    unrelated.mkdir()
+    (root / "master" / "artists" / "known.flac").write_bytes(b"known")
+    (album / "known.flac").write_bytes(b"known")
+    (album / "lost.flac").write_bytes(b"lost")
+    (album / "album.cue").write_text("cue metadata")
+    (album / "cover.jpg").write_bytes(b"art")
+    (unrelated / "notes.txt").write_text("do not copy")
+    monkeypatch.setattr("builtins.input", lambda _prompt: "archive-a/old-drive")
+
+    result = main(
+        [
+            "--root",
+            str(root),
+            "--color",
+            "never",
+            "scan",
+            str(target),
+            "--pull",
+            "--progress",
+            "always",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    pulled = root / "backlog" / "archive-a" / "old-drive" / "Albums" / "Live"
+    assert result == 0
+    assert (pulled / "known.flac").read_bytes() == b"known"
+    assert (pulled / "lost.flac").read_bytes() == b"lost"
+    assert (pulled / "album.cue").read_text() == "cue metadata"
+    assert (pulled / "cover.jpg").read_bytes() == b"art"
+    assert not (root / "backlog" / "archive-a" / "old-drive" / "Documents").exists()
+    assert "Pulled 1 containing directory into backlog/archive-a/old-drive" in captured.out
+
+
+def test_scan_pull_refuses_an_existing_destination(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    target = tmp_path / "old-drive"
+    target.mkdir()
+    (target / "lost.flac").write_bytes(b"lost")
+    existing = root / "backlog" / "archive-a"
+    existing.mkdir()
+    (existing / "keep.txt").write_text("keep")
+    monkeypatch.setattr("builtins.input", lambda _prompt: "archive-a")
+
+    result = main(["--root", str(root), "scan", str(target), "--pull"])
+
+    assert result == 1
+    assert (existing / "keep.txt").read_text() == "keep"
+    assert "destination already exists" in capsys.readouterr().err
+
+
 def test_scan_progress_can_be_forced(tmp_path: Path, capsys) -> None:
     root = tmp_path / "music-vault"
     make_layout(root)

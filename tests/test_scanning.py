@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from muse.scanning import ScanProgress, compare_with_vault
+from muse.scanning import PullProgress, ScanProgress, compare_with_vault, pull_new_directories
 
 
 def test_quick_scan_compares_name_case_insensitively_and_size(tmp_path: Path) -> None:
@@ -66,6 +66,38 @@ def test_scan_reports_target_inventory_progress_and_extension_totals(
     assert report.target_extensions == {".mp3": 1}
     assert report.target_extension_bytes == {".mp3": 5}
     assert all(item.extension != ".mp4" for item in report.new_files)
+
+
+def test_pull_reports_progress_for_every_file_in_containing_directory(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "vault"
+    target = tmp_path / "drive"
+    album = target / "album"
+    (root / "backlog").mkdir(parents=True)
+    album.mkdir(parents=True)
+    (album / "lost.flac").write_bytes(b"audio")
+    (album / "cover.jpg").write_bytes(b"art")
+    report = compare_with_vault(root, target)
+    updates: list[PullProgress] = []
+
+    pull_new_directories(
+        root,
+        target,
+        report.new_files,
+        root / "backlog" / "drive",
+        updates.append,
+    )
+
+    assert updates[0] == PullProgress(total_files=2, total_bytes=8)
+    assert updates[-1] == PullProgress(
+        total_files=2,
+        total_bytes=8,
+        completed_files=2,
+        completed_bytes=8,
+        complete=True,
+    )
+    assert [update.completed_files for update in updates[1:-1]] == [1, 2]
 
 
 def test_scan_rejects_target_inside_vault(tmp_path: Path) -> None:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
+import tempfile
 from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -40,6 +42,29 @@ class ScanProgress:
 
 
 ScanProgressCallback = Callable[[ScanProgress], None]
+
+
+@dataclass(frozen=True)
+class PullResult:
+    """Directories copied from an external scan into backlog."""
+
+    destination: Path
+    source_directories: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
+class PullProgress:
+    """Progress while copying selected external directories into backlog."""
+
+    total_files: int
+    total_bytes: int
+    completed_files: int = 0
+    completed_bytes: int = 0
+    current: str | None = None
+    complete: bool = False
+
+
+PullProgressCallback = Callable[[PullProgress], None]
 
 
 @dataclass
@@ -183,6 +208,126 @@ def _inventory(
                 errors.append(ScanError(str(path), str(error)))
     files.sort(key=lambda item: item.relative.casefold())
     return files
+
+
+def _pull_totals(sources: list[Path]) -> tuple[int, int]:
+    """Count regular files to provide determinate copy progress."""
+    files = 0
+    logical_bytes = 0
+    pending = list(sources)
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if entry.is_symlink():
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(Path(entry.path))
+                elif entry.is_file(follow_symlinks=False):
+                    files += 1
+                    logical_bytes += entry.stat(follow_symlinks=False).st_size
+    return files, logical_bytes
+
+
+def pull_new_directories(
+    root: Path,
+    target: Path,
+    new_files: list[ScannedFile],
+    destination: Path,
+    progress: PullProgressCallback | None = None,
+) -> PullResult:
+    """Copy whole directories containing not-found audio into a new backlog path.
+
+    Copying a containing directory, rather than selected audio files, preserves
+    cue sheets, artwork, metadata, and other release-adjacent material. The
+    destination is assembled beside its final path and renamed into place so a
+    failed copy is never mistaken for a completed pull.
+    """
+    root = root.absolute()
+    target = target.absolute()
+    backlog = root / "backlog"
+    destination = destination.absolute()
+    if not target.is_dir():
+        raise ValueError("--pull requires a directory target; scan the containing directory")
+    if not backlog.is_dir():
+        raise ValueError("backlog directory does not exist")
+    if destination == backlog or not destination.is_relative_to(backlog):
+        raise ValueError("pull destination must be a new directory below backlog/")
+    if destination.exists() or destination.is_symlink():
+        raise ValueError(f"pull destination already exists: {destination}")
+    if destination.resolve(strict=False).is_relative_to(backlog.resolve()) is False:
+        raise ValueError("pull destination escapes backlog through a symlink")
+
+    containing = {item.path.parent for item in new_files}
+    for directory in containing:
+        if directory != target and not directory.is_relative_to(target):
+            raise ValueError(f"not-found file is outside the scan target: {directory}")
+    ordered = sorted(containing, key=lambda path: (len(path.parts), str(path).casefold()))
+    sources: list[Path] = []
+    for directory in ordered:
+        if not any(directory == parent or directory.is_relative_to(parent) for parent in sources):
+            sources.append(directory)
+    if not sources:
+        raise ValueError("there are no not-found audio directories to pull")
+
+    total_files, total_bytes = _pull_totals(sources)
+    completed_files = 0
+    completed_bytes = 0
+    if progress:
+        progress(PullProgress(total_files, total_bytes))
+
+    def copy_file(source: str, copied_destination: str) -> str:
+        nonlocal completed_files, completed_bytes
+        size = os.stat(source, follow_symlinks=False).st_size
+        result = shutil.copy2(source, copied_destination)
+        completed_files += 1
+        completed_bytes += size
+        if progress:
+            progress(
+                PullProgress(
+                    total_files,
+                    total_bytes,
+                    completed_files,
+                    completed_bytes,
+                    source,
+                )
+            )
+        return result
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.pull-", dir=destination.parent))
+    try:
+        for source in sources:
+            if source == target:
+                shutil.copytree(
+                    source,
+                    staging,
+                    symlinks=True,
+                    copy_function=copy_file,
+                    dirs_exist_ok=True,
+                )
+            else:
+                shutil.copytree(
+                    source,
+                    staging / source.relative_to(target),
+                    symlinks=True,
+                    copy_function=copy_file,
+                )
+        staging.replace(destination)
+    except (OSError, shutil.Error):
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    if progress:
+        progress(
+            PullProgress(
+                total_files,
+                total_bytes,
+                completed_files,
+                completed_bytes,
+                complete=True,
+            )
+        )
+    return PullResult(destination, tuple(sources))
 
 
 def _digest(item: ScannedFile) -> tuple[ScannedFile, str]:
