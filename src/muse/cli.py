@@ -115,7 +115,8 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     stats.set_defaults(handler=_stats)
 
     dupes = commands.add_parser(
-        "dupes", help="find exact duplicate files using cached SHA-256 hashes"
+        "dupes",
+        help="find byte-identical files; names and locations need not match",
     )
     dupes.add_argument(
         "targets",
@@ -130,7 +131,7 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     dupes.add_argument(
         "--trees",
         action="store_true",
-        help="report maximal exact duplicate directory trees (hashes every file)",
+        help="report maximal byte-identical directory trees (hashes every file)",
     )
     dupes.add_argument(
         "--progress",
