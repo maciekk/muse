@@ -504,6 +504,10 @@ def _analyze_trees(
             continue
         paths.sort()
         files, logical_bytes = counts[paths[0]]
+        # Empty files still participate in structural fingerprints for mixed
+        # trees, but an all-zero-byte tree is not a useful duplicate group.
+        if logical_bytes == 0:
+            continue
         report.tree_groups.append(
             TreeDuplicateGroup(
                 digest,
