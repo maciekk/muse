@@ -159,15 +159,19 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
         parser_class=partial(argparse.ArgumentParser, formatter_class=formatter),
     )
 
-    doctor = commands.add_parser("doctor", help="inspect repository layout and supporting tools")
+    def command(name: str, summary: str) -> argparse.ArgumentParser:
+        description = f"{summary[:1].upper()}{summary[1:].removesuffix('.')}."
+        return commands.add_parser(name, help=summary, description=description)
+
+    doctor = command("doctor", "inspect repository layout and supporting tools")
     _add_json_argument(doctor)
     doctor.set_defaults(handler=_doctor)
 
-    status = commands.add_parser("status", help="show top-level repository status")
+    status = command("status", "show top-level repository status")
     _add_json_argument(status)
     status.set_defaults(handler=_status)
 
-    stats = commands.add_parser("stats", help="report file counts and disk usage")
+    stats = command("stats", "report file counts and disk usage")
     stats.add_argument(
         "target",
         nargs="?",
@@ -176,9 +180,7 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     _add_json_argument(stats)
     stats.set_defaults(handler=_stats)
 
-    scan = commands.add_parser(
-        "scan", help="check whether an external tree contains files absent from the vault"
-    )
+    scan = command("scan", "check whether an external tree contains files absent from the vault")
     scan.add_argument("target", help="external file or directory to inspect")
     scan.add_argument(
         "--thorough",
@@ -205,9 +207,7 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     _add_json_argument(scan)
     scan.set_defaults(handler=_scan)
 
-    search = commands.add_parser(
-        "search", help="find files or directories by name across the vault"
-    )
+    search = command("search", "find files or directories by name across the vault")
     search.add_argument(
         "terms",
         nargs="+",
@@ -217,9 +217,8 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     _add_json_argument(search)
     search.set_defaults(handler=_search)
 
-    dupes = commands.add_parser(
-        "dupes",
-        help="find byte-identical files; names and locations need not match",
+    dupes = command(
+        "dupes", "find byte-identical files; names and locations need not match"
     )
     dupes.add_argument(
         "targets",
@@ -251,17 +250,17 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     _add_json_argument(dupes)
     dupes.set_defaults(handler=_dupes)
 
-    prune = commands.add_parser("prune", help="remove missing files from the hash cache")
+    prune = command("prune", "remove missing files from the hash cache")
     _add_json_argument(prune)
     prune.set_defaults(handler=_prune)
 
-    tree_diff = commands.add_parser("diff", help="compare two directory trees exactly")
+    tree_diff = command("diff", "compare two directory trees exactly")
     tree_diff.add_argument("left", help="first tree; relative paths are beneath the library root")
     tree_diff.add_argument("right", help="second tree; relative paths are beneath the library root")
     _add_json_argument(tree_diff)
     tree_diff.set_defaults(handler=_diff)
 
-    compact = commands.add_parser("compact", help="plan exact duplicate-tree compaction")
+    compact = command("compact", "plan exact duplicate-tree compaction")
     compact.add_argument(
         "target",
         nargs="?",
@@ -285,10 +284,10 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     _add_max_threads_argument(compact)
     compact.set_defaults(handler=_compact)
 
-    commands.add_parser("help", help="show help for Muse or one command")
+    command("help", "show help for Muse or one command")
 
-    import_command = commands.add_parser(
-        "import", help="strictly validate, plan, or apply an album import into master"
+    import_command = command(
+        "import", "strictly validate, plan, or apply an album import into master"
     )
     import_command.add_argument("source", help="directory beneath backlog to import")
     import_command.add_argument(
@@ -302,13 +301,13 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     _add_json_argument(import_command)
     import_command.set_defaults(handler=_import)
 
-    relocation = commands.add_parser("mv", help="move content and preserve cached hashes")
+    relocation = command("mv", "move content and preserve cached hashes")
     relocation.add_argument("source", help="existing path beneath the library root")
     relocation.add_argument("destination", help="new path beneath the library root")
     _add_json_argument(relocation)
     relocation.set_defaults(handler=_move)
 
-    slag = commands.add_parser("slag", help="inspect or move non-audio backlog artifacts")
+    slag = command("slag", "inspect or move non-audio backlog artifacts")
     slag.add_argument(
         "sources",
         nargs="*",

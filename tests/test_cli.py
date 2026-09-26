@@ -35,6 +35,29 @@ def test_help_command_shows_command_specific_usage(capsys) -> None:
     assert "--max-threads" in output
 
 
+def test_every_command_help_starts_with_a_summary(capsys) -> None:
+    summaries = {
+        "doctor": "Inspect repository layout and supporting tools.",
+        "status": "Show top-level repository status.",
+        "stats": "Report file counts and disk usage.",
+        "scan": "Check whether an external tree contains files absent from the vault.",
+        "search": "Find files or directories by name across the vault.",
+        "dupes": "Find byte-identical files; names and locations need not match.",
+        "prune": "Remove missing files from the hash cache.",
+        "diff": "Compare two directory trees exactly.",
+        "compact": "Plan exact duplicate-tree compaction.",
+        "help": "Show help for Muse or one command.",
+        "import": "Strictly validate, plan, or apply an album import into master.",
+        "mv": "Move content and preserve cached hashes.",
+        "slag": "Inspect or move non-audio backlog artifacts.",
+    }
+
+    for command, summary in summaries.items():
+        assert main(["help", command]) == 0
+        output = capsys.readouterr().out
+        assert f"\n\n{summary}\n\n" in output
+
+
 def test_help_honors_explicit_color_policy(capsys) -> None:
     assert main(["--color", "always"]) == 0
     colored = capsys.readouterr().out
