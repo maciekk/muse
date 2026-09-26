@@ -242,6 +242,32 @@ def test_dupes_reports_exact_files_and_persists_hashes(tmp_path: Path, capsys) -
     assert (root / ".muse" / "muse.db").is_file()
 
 
+def test_vault_wide_dupes_skips_slag_and_trash_unless_selected(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    (root / "master" / "song.flac").write_bytes(b"audio")
+    (root / "backlog" / "copy.flac").write_bytes(b"audio")
+    (root / "slag" / "artifact.flac").write_bytes(b"audio")
+    (root / "trash").mkdir()
+    (root / "trash" / "removed.flac").write_bytes(b"audio")
+
+    for target in ([], ["."]):
+        assert main(["--root", str(root), "dupes", *target, "--json"]) == 0
+        report = json.loads(capsys.readouterr().out)
+        assert report["files"] == 2
+        assert report["groups"][0]["files"] == ["backlog/copy.flac", "master/song.flac"]
+
+    assert main(["--root", str(root), "dupes", "trash", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["files"] == 1
+    assert main(["--root", str(root), "dupes", "slag", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["files"] == 1
+
+    assert main(["--root", str(root), "dupes", "--trees", "--json"]) == 0
+    trees = json.loads(capsys.readouterr().out)
+    assert trees["files"] == 2
+    assert trees["tree_duplicate_groups"] == 0
+
+
 def test_prune_reports_cache_maintenance_stats(tmp_path: Path, capsys) -> None:
     root = tmp_path / "music-vault"
     make_layout(root)

@@ -108,6 +108,7 @@ muse prune                         # discard hashes for files that no longer exi
 ```
 
 `dupes` does not change music files. It stores SHA-256 hashes and file size/modification-time metadata in `.muse/muse.db`, then reuses hashes for unchanged files. The default report avoids hashing files whose size occurs only once, since they cannot be exact duplicates.
+Vault-wide duplicate searches skip `slag/` and `trash/`. To inspect either area deliberately, pass it as an explicit target (for example, `muse dupes slag`).
 
 Duplicate reporting rules:
 

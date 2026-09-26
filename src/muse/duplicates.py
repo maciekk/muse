@@ -181,8 +181,8 @@ class DuplicateReport:
         }
 
 
-def _iter_files(target: Path, excluded: Path, errors: list[ScanError]) -> Iterator[Path]:
-    for item in walk(target, exclude=lambda path: path == excluded, sort=True, follow_root=True):
+def _iter_files(target: Path, excluded: frozenset[Path], errors: list[ScanError]) -> Iterator[Path]:
+    for item in walk(target, exclude=lambda path: path in excluded, sort=True, follow_root=True):
         if isinstance(item, WalkError):
             errors.append(ScanError(str(item.path), item.message))
         elif item.kind == "file":
@@ -205,7 +205,7 @@ def _notify(callback: ProgressCallback | None, update: ProgressUpdate) -> None:
 
 def _inventory(
     target: Path,
-    excluded: Path,
+    excluded: frozenset[Path],
     connection: sqlite3.Connection,
     report: DuplicateReport,
     rehash: bool,
@@ -359,9 +359,11 @@ def _collect_hashes(
     return by_hash, hashes
 
 
-def _directory_paths(target: Path, excluded: Path, errors: list[ScanError]) -> list[Path]:
+def _directory_paths(
+    target: Path, excluded: frozenset[Path], errors: list[ScanError]
+) -> list[Path]:
     directories = []
-    for item in walk(target, exclude=lambda path: path == excluded, sort=True, follow_root=True):
+    for item in walk(target, exclude=lambda path: path in excluded, sort=True, follow_root=True):
         if isinstance(item, WalkError):
             errors.append(ScanError(str(item.path), item.message))
         elif item.kind == "directory":
@@ -441,6 +443,7 @@ def find_duplicates(
     trees: bool = False,
     progress: ProgressCallback | None = None,
     max_threads: int | None = None,
+    exclude: Sequence[Path] = (),
 ) -> DuplicateReport:
     """Find exact duplicates, retaining hashes in SQLite for later scans."""
     if max_threads is not None and max_threads < 1:
@@ -450,6 +453,7 @@ def find_duplicates(
         [target.absolute()] if isinstance(target, Path) else [path.absolute() for path in target]
     )
     database = database.absolute()
+    excluded = frozenset((database.parent, *(path.absolute() for path in exclude)))
     report = DuplicateReport(", ".join(map(str, targets)), str(database))
 
     for scan_target in targets:
@@ -483,7 +487,7 @@ def find_duplicates(
         inventory = []
         for scan_target in targets:
             inventory.extend(
-                _inventory(scan_target, database.parent, connection, report, rehash, progress)
+                _inventory(scan_target, excluded, connection, report, rehash, progress)
             )
         size_counts = Counter(candidate.size for candidate in inventory)
         candidates = (
@@ -512,7 +516,7 @@ def find_duplicates(
         phase_started = perf_counter()
         _analyze(by_hash, report, progress)
         if trees:
-            directories = _directory_paths(display_target, database.parent, report.errors)
+            directories = _directory_paths(display_target, excluded, report.errors)
             if not report.errors:
                 _analyze_trees(
                     display_target,

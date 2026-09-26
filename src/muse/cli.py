@@ -225,7 +225,7 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     dupes.add_argument(
         "targets",
         nargs="*",
-        help="paths to inspect; relative paths are resolved beneath the library root",
+        help="paths to inspect; default scans the vault except slag/ and trash/",
     )
     dupes.add_argument(
         "--rehash",
@@ -1091,6 +1091,7 @@ def _tree_summary_rows(report: DuplicateReport) -> list[tuple[str, str]]:
 
 def _dupes(args: argparse.Namespace, root: Path) -> int:
     targets = [resolve_target(root, target) for target in args.targets] or [root]
+    excluded = (root / "slag", root / "trash") if root in targets else ()
     progress = _DuplicateProgressDisplay(args.progress, args.color, trees=args.trees)
     try:
         report = find_duplicates(
@@ -1100,6 +1101,7 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
             trees=args.trees,
             progress=progress.update,
             max_threads=args.max_threads,
+            exclude=excluded,
         )
     finally:
         progress.stop()
