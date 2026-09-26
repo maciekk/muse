@@ -184,6 +184,11 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
         default="auto",
         help="target scan progress display policy (default: auto)",
     )
+    scan.add_argument(
+        "--all",
+        action="store_true",
+        help="show every not-found directory and file",
+    )
     _add_max_threads_argument(scan)
     _add_json_argument(scan)
     scan.set_defaults(handler=_scan)
@@ -225,6 +230,11 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
         default="auto",
         help="progress display policy (default: auto)",
     )
+    dupes.add_argument(
+        "--all",
+        action="store_true",
+        help="show every duplicate group instead of the 10 largest",
+    )
     _add_max_threads_argument(dupes)
     _add_json_argument(dupes)
     dupes.set_defaults(handler=_dupes)
@@ -254,6 +264,11 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
         default=[],
         metavar="PATH",
         help="prefer retaining copies beneath PATH; repeat in priority order",
+    )
+    compact.add_argument(
+        "--all",
+        action="store_true",
+        help="show every planned trash move",
     )
     _add_max_threads_argument(compact)
     compact.set_defaults(handler=_compact)
@@ -677,7 +692,9 @@ class _ScanProgressDisplay:
             self.running = False
 
 
-def _not_found_directory_rows(report: ScanComparison) -> list[tuple[Any, ...]]:
+def _not_found_directory_rows(
+    report: ScanComparison, *, show_all: bool = False
+) -> list[tuple[Any, ...]]:
     grouped: dict[str, list[ScannedFile]] = {}
     for item in report.new_files:
         directory = str(Path(item.relative).parent)
@@ -688,15 +705,17 @@ def _not_found_directory_rows(report: ScanComparison) -> list[tuple[Any, ...]]:
         grouped.items(),
         key=lambda pair: (-sum(item.size for item in pair[1]), pair[0].casefold()),
     )
-    for directory, items in ordered[:25]:
+    displayed_directories = ordered if show_all else ordered[:25]
+    for directory, items in displayed_directories:
         items.sort(key=lambda item: (-item.size, item.path.name.casefold()))
         examples = Text()
-        for index, item in enumerate(items[:5]):
+        displayed_items = items if show_all else items[:5]
+        for index, item in enumerate(displayed_items):
             if index:
                 examples.append("\n")
             examples.append(item.path.name, style="bold cyan")
             examples.append(f"  {human_bytes(item.size)}", style="dim")
-        omitted = len(items) - 5
+        omitted = len(items) - len(displayed_items)
         if omitted > 0:
             examples.append(f"\n…and {human_number(omitted)} more", style="dim")
         rows.append(
@@ -754,10 +773,10 @@ def _scan(args: argparse.Namespace, root: Path) -> int:
     if report.new_files:
         console.print()
         console.print("[bold]Not-found directories[/bold]")
-        directory_rows = _not_found_directory_rows(report)
+        directory_rows = _not_found_directory_rows(report, show_all=args.all)
         print_table(
             console,
-            ("DIRECTORY", "FILES", "LOGICAL", "LARGEST FILES"),
+            ("DIRECTORY", "FILES", "LOGICAL", "FILES" if args.all else "LARGEST FILES"),
             directory_rows,
             right_aligned=frozenset({"FILES", "LOGICAL"}),
         )
@@ -766,7 +785,7 @@ def _scan(args: argparse.Namespace, root: Path) -> int:
         if omitted_directories:
             console.print(
                 f"[dim]…and {human_number(omitted_directories)} more directories; "
-                "use --json for all paths.[/dim]"
+                "use --all (or --json) for all paths.[/dim]"
             )
 
     if report.new_audio_files:
@@ -989,6 +1008,7 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
             console.print("[bold]Maximal duplicate directory trees[/bold]")
             terminal_output = sys.stdout.isatty()
             path_width = max(24, console.width - 60)
+            displayed_groups = report.tree_groups if args.all else report.tree_groups[:10]
             rows = [
                 (
                     group.sha256[:12],
@@ -1001,7 +1021,7 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
                         for path in group.paths
                     ),
                 )
-                for group in report.tree_groups
+                for group in displayed_groups
             ]
             print_table(
                 console,
@@ -1010,6 +1030,11 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
                 right_aligned=frozenset({"COPIES", "FILES", "EACH", "REPEATED"}),
                 column_widths={"DIRECTORIES": path_width} if terminal_output else None,
             )
+            if len(report.tree_groups) > len(displayed_groups):
+                console.print(
+                    f"[dim]{human_number(len(report.tree_groups) - len(displayed_groups))} "
+                    "more duplicate tree groups; use --all to show them.[/dim]"
+                )
 
         if report.groups and not args.trees:
             console.print()
@@ -1043,6 +1068,7 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
                     ("\n" + "\n".join(directories), "dim"),
                 )
 
+            displayed_groups = report.groups if args.all else report.groups[:10]
             rows = [
                 (
                     group.sha256[:12],
@@ -1051,7 +1077,7 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
                     human_bytes(group.logical_repeated_bytes),
                     file_and_paths(group),
                 )
-                for group in report.groups
+                for group in displayed_groups
             ]
             print_table(
                 console,
@@ -1060,6 +1086,11 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
                 right_aligned=frozenset({"COPIES", "EACH", "REPEATED"}),
                 column_widths={"FILES": path_width} if terminal_output else None,
             )
+            if len(report.groups) > len(displayed_groups):
+                console.print(
+                    f"[dim]{human_number(len(report.groups) - len(displayed_groups))} "
+                    "more duplicate groups; use --all to show them.[/dim]"
+                )
 
         if report.errors:
             error_console = make_console(args.color, stderr=True)
@@ -1289,7 +1320,7 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
         except FileNotFoundError:
             console.print("[yellow]No pending compact plan.[/yellow]")
             return 1
-        _show_compact_plan(console, operations)
+        _show_compact_plan(console, operations, limit=None if args.all else 10)
         confirmation = input("Type TRASH to apply this plan: ")
         if confirmation != "TRASH":
             console.print("[yellow]Compaction cancelled.[/yellow]")
@@ -1358,7 +1389,7 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
         console.print("[red]Compaction plan was not saved because scanning had errors.[/red]")
         return 1
     save_plan(root, operations)
-    _show_compact_plan(console, operations)
+    _show_compact_plan(console, operations, limit=None if args.all else 10)
     console.print(
         "[dim]No files were changed. Review: muse compact --show; apply: muse compact --apply[/dim]"
     )

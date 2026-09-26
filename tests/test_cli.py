@@ -31,6 +31,7 @@ def test_help_command_shows_command_specific_usage(capsys) -> None:
     assert "Usage: muse dupes" in output
     assert "--trees" in output
     assert "--rehash" in output
+    assert "--all" in output
     assert "--max-threads" in output
 
 
@@ -381,6 +382,28 @@ def test_compact_apply_announces_reverification(
     assert len(list((root / "trash").glob("*/*/backlog/*/song.flac"))) == 1
 
 
+def test_dupes_all_shows_groups_omitted_from_default_table(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    for index in range(11):
+        for copy in ("a", "b"):
+            (root / "backlog" / f"group-{index:02}-{copy}.flac").write_bytes(
+                bytes([index + 1]) * (index + 1)
+            )
+
+    assert main(["--root", str(root), "--color", "never", "dupes", "backlog"]) == 0
+    default_output = capsys.readouterr().out
+    assert "1 more duplicate groups; use --all" in default_output
+    assert "group-00-a.flac" not in default_output
+
+    assert main(
+        ["--root", str(root), "--color", "never", "dupes", "backlog", "--all"]
+    ) == 0
+    all_output = capsys.readouterr().out
+    assert "group-00-a.flac" in all_output
+    assert "more duplicate groups" not in all_output
+
+
 def test_dupes_shows_shared_filename_once_with_its_directories(tmp_path: Path, capsys) -> None:
     root = tmp_path / "music-vault"
     make_layout(root)
@@ -514,6 +537,28 @@ def test_scan_leads_with_target_extensions_and_groups_examples_by_directory(
     assert "birthday.mp4" not in output
     assert "1 definite audio" not in output
     assert "6 definite audio files were not found" in output
+
+
+def test_scan_all_lists_every_not_found_file(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    target = tmp_path / "old-drive"
+    album = target / "album"
+    album.mkdir(parents=True)
+    for index in range(6):
+        (album / f"track-{index}.mp3").write_bytes(bytes(index + 1))
+
+    assert main(["--root", str(root), "--color", "never", "scan", str(target)]) == 0
+    default_output = capsys.readouterr().out
+    assert "track-0.mp3" not in default_output
+    assert "…and 1 more" in default_output
+
+    assert main(
+        ["--root", str(root), "--color", "never", "scan", str(target), "--all"]
+    ) == 0
+    all_output = capsys.readouterr().out
+    assert "track-0.mp3" in all_output
+    assert "…and 1 more" not in all_output
 
 
 def test_scan_progress_can_be_forced(tmp_path: Path, capsys) -> None:
