@@ -57,6 +57,19 @@ def test_find_duplicates_reports_exact_matches_and_reuses_hashes(tmp_path: Path)
     assert len(second.groups) == 1
 
 
+def test_find_duplicates_ignores_zero_byte_files(tmp_path: Path) -> None:
+    (tmp_path / "one.empty").touch()
+    (tmp_path / "two.empty").touch()
+    database = tmp_path / ".muse" / "muse.db"
+
+    report = find_duplicates(tmp_path, database)
+
+    assert report.files == 2
+    assert report.hash_candidate_files == 0
+    assert report.hashed_files == 0
+    assert report.groups == []
+
+
 def test_find_duplicate_trees_reports_only_maximal_roots(tmp_path: Path) -> None:
     for root in (tmp_path / "first", tmp_path / "second"):
         (root / "album").mkdir(parents=True)

@@ -48,6 +48,7 @@ class PathStats:
     symlinks: int = 0
     other_entries: int = 0
     audio_files: int = 0
+    zero_byte_files: int = 0
     logical_bytes: int = 0
     allocated_bytes: int = 0
     allocated_bytes_available: bool = True
@@ -64,6 +65,7 @@ class PathStats:
         self.symlinks += other.symlinks
         self.other_entries += other.other_entries
         self.audio_files += other.audio_files
+        self.zero_byte_files += other.zero_byte_files
         self.logical_bytes += other.logical_bytes
         self.allocated_bytes += other.allocated_bytes
         self.allocated_bytes_available &= other.allocated_bytes_available
@@ -78,6 +80,7 @@ class PathStats:
             "other_entries": self.other_entries,
             "audio_files": self.audio_files,
             "non_audio_files": self.non_audio_files,
+            "zero_byte_files": self.zero_byte_files,
             "logical_bytes": self.logical_bytes,
             "allocated_bytes": (self.allocated_bytes if self.allocated_bytes_available else None),
             "extensions": dict(sorted(self.extensions.items())),
@@ -88,6 +91,8 @@ class PathStats:
 def _record_file(stats: PathStats, path: Path, stat_result: os.stat_result) -> None:
     stats.files += 1
     stats.logical_bytes += stat_result.st_size
+    if stat_result.st_size == 0:
+        stats.zero_byte_files += 1
 
     blocks = getattr(stat_result, "st_blocks", None)
     if blocks is None:

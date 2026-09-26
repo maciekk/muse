@@ -405,6 +405,7 @@ def _stats_row(name: str, stats: PathStats) -> tuple[str, ...]:
         human_number(stats.files),
         human_number(stats.audio_files),
         human_number(stats.non_audio_files),
+        human_number(stats.zero_byte_files),
         human_number(stats.directories),
         human_number(stats.symlinks),
         human_bytes(stats.logical_bytes),
@@ -449,6 +450,7 @@ def _stats(args: argparse.Namespace, root: Path) -> int:
                 "FILES",
                 "AUDIO",
                 "OTHER",
+                "ZERO-BYTE",
                 "DIRS",
                 "LINKS",
                 "LOGICAL",
@@ -457,7 +459,17 @@ def _stats(args: argparse.Namespace, root: Path) -> int:
             ),
             rows,
             right_aligned=frozenset(
-                {"FILES", "AUDIO", "OTHER", "DIRS", "LINKS", "LOGICAL", "ALLOCATED", "ERRORS"}
+                {
+                    "FILES",
+                    "AUDIO",
+                    "OTHER",
+                    "ZERO-BYTE",
+                    "DIRS",
+                    "LINKS",
+                    "LOGICAL",
+                    "ALLOCATED",
+                    "ERRORS",
+                }
             ),
             bold_rows=frozenset({"TOTAL"}),
         )

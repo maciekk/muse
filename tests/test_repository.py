@@ -23,6 +23,17 @@ def test_scan_path_counts_files_bytes_extensions_and_symlinks(tmp_path: Path) ->
     assert stats.errors == []
 
 
+def test_scan_path_counts_zero_byte_files(tmp_path: Path) -> None:
+    (tmp_path / "empty.flac").touch()
+    (tmp_path / "nonempty.flac").write_bytes(b"audio")
+
+    stats = scan_path(tmp_path)
+
+    assert stats.files == 2
+    assert stats.zero_byte_files == 1
+    assert stats.to_dict()["zero_byte_files"] == 1
+
+
 def test_scan_path_reports_missing_target(tmp_path: Path) -> None:
     stats = scan_path(tmp_path / "missing")
 

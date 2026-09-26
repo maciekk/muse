@@ -596,7 +596,9 @@ def find_duplicates(
             )
         size_counts = Counter(candidate.size for candidate in inventory)
         candidates = inventory if trees else [
-            candidate for candidate in inventory if size_counts[candidate.size] > 1
+            candidate
+            for candidate in inventory
+            if candidate.size > 0 and size_counts[candidate.size] > 1
         ]
         report.hash_candidate_files = len(candidates)
         report.hash_candidate_bytes = sum(candidate.size for candidate in candidates)
