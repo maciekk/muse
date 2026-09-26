@@ -199,6 +199,13 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     compact_actions = compact.add_mutually_exclusive_group()
     compact_actions.add_argument("--show", action="store_true", help="show the pending plan")
     compact_actions.add_argument("--apply", action="store_true", help="apply the pending plan")
+    compact.add_argument(
+        "--prefer",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="prefer retaining copies beneath PATH; repeat in priority order",
+    )
     _add_max_threads_argument(compact)
     compact.set_defaults(handler=_compact)
 
@@ -968,8 +975,11 @@ def _show_compact_plan(
 
 def _compact(args: argparse.Namespace, root: Path) -> int:
     console = make_console(args.color)
-    if (args.show or args.apply) and args.target:
-        console.print("[red]A pending plan already defines its scope; omit the target.[/red]")
+    if (args.show or args.apply) and (args.target or args.prefer):
+        console.print(
+            "[red]A pending plan already defines its scope and preferences; "
+            "omit the target and --prefer.[/red]"
+        )
         return 1
     if args.show:
         try:
@@ -1029,12 +1039,22 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
     except ValueError:
         console.print("[red]Compaction target must be inside the library root.[/red]")
         return 1
+    preferences = []
+    for value in args.prefer:
+        preferred = resolve_target(root, value)
+        try:
+            preferences.append(preferred.relative_to(root))
+        except ValueError:
+            console.print("[red]Preferred paths must be inside the library root.[/red]")
+            return 1
     worker_limit = min(args.max_threads or 16, os.cpu_count() or 1)
     console.print(
         f"[dim]Scanning with up to {worker_limit} worker "
         f"{'thread' if worker_limit == 1 else 'threads'}…[/dim]"
     )
-    operations, errors = make_plan(root, target, max_threads=args.max_threads)
+    operations, errors = make_plan(
+        root, target, preferences=preferences, max_threads=args.max_threads
+    )
     if errors:
         console.print("[red]Compaction plan was not saved because scanning had errors.[/red]")
         return 1

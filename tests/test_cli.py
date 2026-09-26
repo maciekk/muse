@@ -261,6 +261,47 @@ def test_compact_show_lists_every_planned_removal(tmp_path: Path, capsys) -> Non
     )
 
 
+def test_compact_prefer_selects_retained_subtree(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    for name in ("alpha", "beta"):
+        directory = root / "backlog" / name
+        directory.mkdir()
+        (directory / "song.flac").write_bytes(b"same")
+
+    result = main(
+        [
+            "--root",
+            str(root),
+            "compact",
+            "backlog",
+            "--prefer",
+            "backlog/beta",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "backlog/alpha" in output
+    assert "backlog/beta" in output
+    plan = json.loads((root / ".muse" / "compact-plan.json").read_text())
+    assert plan["operations"][0]["retain"] == "backlog/beta"
+    assert plan["operations"][0]["remove"] == "backlog/alpha"
+
+
+def test_compact_rejects_preference_outside_root(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+
+    result = main(
+        ["--root", str(root), "compact", "backlog", "--prefer", str(tmp_path)]
+    )
+
+    assert result == 1
+    assert "Preferred paths must be inside the library root" in capsys.readouterr().out
+    assert not (root / ".muse" / "compact-plan.json").exists()
+
+
 def test_compact_apply_announces_reverification(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:

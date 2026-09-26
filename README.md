@@ -58,6 +58,7 @@ muse dupes backlog --max-threads 4  # limit concurrent hashing workers
 muse prune                   # discard hashes for files that no longer exist
 muse diff tree-a tree-b      # explain why two trees differ
 muse compact [backlog]        # create the sole pending compaction plan
+muse compact backlog --prefer backlog/archive-a --prefer backlog/archive-b
 muse compact --apply          # reverify, confirm, then apply that plan
 muse import backlog/album games/album  # plan a minimal audio-only import
 muse import backlog/album --apply      # reverify, confirm, then move it into master
@@ -87,7 +88,7 @@ Machine-readable JSON never contains terminal styling. Potentially slow operatio
 
 `slag/` isolates non-music artifacts moved from backlog for later triage. It retains the original backlog-relative path so provenance remains visible.
 
-Compaction reverifies every planned duplicate tree immediately before mutation, then moves redundant trees into a dated operation receipt beneath `trash/`, preserving their original repository-relative paths. Plans record each tree's filenames, file sizes, and high-resolution modification/change timestamps, so applying a current plan does not need to hash content or query the hash cache per file; older pending plans fall back to content-fingerprint verification. These same-filesystem renames are cheap and recoverable; permanent trash purging is a separate future operation.
+Compaction reverifies every planned duplicate tree immediately before mutation, then moves redundant trees into a dated operation receipt beneath `trash/`, preserving their original repository-relative paths. Repeat `--prefer PATH` in priority order when planning to favor authoritative subtrees: for each duplicate group, Muse retains a copy beneath the first matching preferred path. Preferences rank copies only within the same managed-area tier, so the built-in `master`, `backlog`, `stopgap`, `incoming`, `slag`, and `trash` policy still takes precedence. Plans record each tree's filenames, file sizes, and high-resolution modification/change timestamps, so applying a current plan does not need to hash content or query the hash cache per file; older pending plans fall back to content-fingerprint verification. These same-filesystem renames are cheap and recoverable; permanent trash purging is a separate future operation.
 
 ## Design and roadmap
 

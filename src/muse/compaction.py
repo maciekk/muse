@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -62,9 +62,17 @@ def _area(path: str) -> str:
 
 
 def make_plan(
-    root: Path, target: Path | None = None, *, max_threads: int | None = None
+    root: Path,
+    target: Path | None = None,
+    *,
+    preferences: Sequence[Path] = (),
+    max_threads: int | None = None,
 ) -> tuple[list[CompactOperation], list[dict[str, str]]]:
-    """Create the sole pending plan from maximal exact duplicate trees."""
+    """Create the sole pending plan from maximal exact duplicate trees.
+
+    Preferences are ordered library-relative subtrees. They rank copies within
+    the same managed-area retention tier; the fixed area policy still wins.
+    """
     target = root if target is None else target
     report = find_duplicates(
         target, root / ".muse" / "muse.db", trees=True, max_threads=max_threads
@@ -80,7 +88,20 @@ def make_plan(
         if group.logical_bytes < MIN_COMPACT_TREE_BYTES:
             continue
         paths = [str(prefix / path) for path in group.paths]
-        candidates = sorted(paths, key=lambda path: (RETENTION_PRIORITY[_area(path)], path))
+
+        def retention_key(path: str) -> tuple[int, int, str]:
+            candidate = Path(path)
+            preference = next(
+                (
+                    index
+                    for index, preferred in enumerate(preferences)
+                    if candidate == preferred or candidate.is_relative_to(preferred)
+                ),
+                len(preferences),
+            )
+            return RETENTION_PRIORITY[_area(path)], preference, path
+
+        candidates = sorted(paths, key=retention_key)
         retain = candidates[0]
         for remove in candidates[1:]:
             if _area(remove) not in REMOVABLE_AREAS:
