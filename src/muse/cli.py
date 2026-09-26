@@ -37,6 +37,7 @@ from muse.reporting import (
     status_text,
 )
 from muse.repository import PathStats, scan_path, scan_root_by_area
+from muse.tree_diff import TreeDiffReport, compare_trees
 
 
 class MuseHelpFormatter(RichHelpFormatter):
@@ -141,6 +142,12 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     )
     _add_json_argument(dupes)
     dupes.set_defaults(handler=_dupes)
+
+    tree_diff = commands.add_parser("diff", help="compare two directory trees exactly")
+    tree_diff.add_argument("left", help="first tree; relative paths are beneath the library root")
+    tree_diff.add_argument("right", help="second tree; relative paths are beneath the library root")
+    _add_json_argument(tree_diff)
+    tree_diff.set_defaults(handler=_diff)
 
     for name, actions in PLANNED_COMMANDS.items():
         planned = commands.add_parser(name, help=f"planned {name} operations (not implemented)")
@@ -592,6 +599,46 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
             "[dim]Music files were not changed; reusable hashes were stored in .muse/muse.db.[/dim]"
         )
 
+    return 1 if report.errors else 0
+
+
+def _diff_summary_rows(report: TreeDiffReport) -> list[tuple[str, str]]:
+    return [
+        ("Elapsed", human_duration(report.elapsed_seconds)),
+        ("Left files", human_number(report.left_files)),
+        ("Right files", human_number(report.right_files)),
+        ("Hashes computed", human_number(report.hashed_files)),
+        ("Hashes reused", human_number(report.cached_files)),
+        ("Differences", human_number(len(report.differences))),
+        ("Errors", human_number(len(report.errors))),
+    ]
+
+
+def _diff(args: argparse.Namespace, root: Path) -> int:
+    report = compare_trees(
+        resolve_target(root, args.left),
+        resolve_target(root, args.right),
+        root / ".muse" / "muse.db",
+    )
+    if args.json:
+        emit_json(report.to_dict())
+    else:
+        console = make_console(args.color)
+        console.print("[bold]Exact tree comparison[/bold]")
+        console.print("[dim]Left[/dim]", report.left)
+        console.print("[dim]Right[/dim]", report.right, "\n")
+        print_table(
+            console,
+            ("METRIC", "VALUE"),
+            _diff_summary_rows(report),
+            right_aligned=frozenset({"VALUE"}),
+        )
+        if report.differences:
+            print_table(
+                console,
+                ("KIND", "PATH"),
+                [(difference.kind, difference.path) for difference in report.differences],
+            )
     return 1 if report.errors else 0
 
 
