@@ -1,11 +1,16 @@
 import json
 import subprocess
+from argparse import Namespace
 from pathlib import Path
 
+import pytest
+
 from muse.cli import main
+from muse.commands import content
 from muse.commands.compact import _compact_path_texts
 from muse.commands.overview import _extension_text
 from muse.config import MANAGED_AREAS, MASTER_SHELVES
+from muse.importing import ImportFinding, ImportValidationError
 
 
 def make_layout(root: Path) -> None:
@@ -620,6 +625,44 @@ def test_import_asks_to_accept_inconsistent_album_artists(
     assert "Review required" in output
     assert "Kenji Kawai, Kimiko Itoh" in output
     assert "accepted inconsistent album artist tags" in output
+
+
+def test_import_confirmation_uses_finding_code_and_retries_validation(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    calls: list[bool] = []
+
+    def make_plan(_root, _source, _destination, *, accept_inconsistent_album_artists=False):
+        calls.append(accept_inconsistent_album_artists)
+        if not accept_inconsistent_album_artists:
+            raise ImportValidationError(
+                [ImportFinding("inconsistent_album_artist", "Album artists differ: One, Two")]
+            )
+        raise ImportValidationError([ImportFinding("inconsistent_album", "Albums differ")])
+
+    monkeypatch.setattr(content, "make_import_plan", make_plan)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "yes")
+    args = Namespace(destination="albums/example", json=False, color="never")
+
+    with pytest.raises(ImportValidationError, match="Albums differ"):
+        content._make_import_plan_with_confirmation(args, tmp_path, tmp_path / "source")
+
+    assert calls == [False, True]
+    assert "Album artists differ: One, Two" in capsys.readouterr().out
+
+
+def test_import_json_requires_interactive_album_artist_review(tmp_path: Path, monkeypatch) -> None:
+    def make_plan(*_args, **_kwargs):
+        raise ImportValidationError([
+            ImportFinding("inconsistent_album_artist", "Album artists differ: One, Two")
+        ])
+
+    monkeypatch.setattr(content, "make_import_plan", make_plan)
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("JSON import prompted"))
+    args = Namespace(destination="albums/example", json=True, color="never")
+
+    with pytest.raises(ValueError, match="rerun without --json"):
+        content._make_import_plan_with_confirmation(args, tmp_path, tmp_path / "source")
 
 
 def test_scan_json_reports_files_absent_from_all_vault_areas(

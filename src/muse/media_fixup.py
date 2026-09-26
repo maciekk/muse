@@ -46,6 +46,23 @@ def _text(tags: object, *keys: str) -> str | None:
     return None
 
 
+def _id3_defaults(tags: ID3, path: Path, *, single: bool) -> list[str]:
+    changes: list[str] = []
+    artist = _text(tags, "TPE1")
+    if not _text(tags, "TPE2") and artist:
+        tags.add(TPE2(encoding=3, text=[artist]))
+        changes.append(f"{path.name}: album artist = {artist}")
+    match = _TRACK_PREFIX.match(path.name)
+    if not _text(tags, "TRCK") and (single or match):
+        track = "1/1" if single else str(int(match.group(1) if match else 1))
+        tags.add(TRCK(encoding=3, text=[track]))
+        changes.append(f"{path.name}: track = {track}")
+    if not _text(tags, "TPOS"):
+        tags.add(TPOS(encoding=3, text=["1/1"]))
+        changes.append(f"{path.name}: disc = 1/1")
+    return changes
+
+
 def repair_tags(path: Path, *, single: bool = False) -> tuple[str, ...]:
     """Fill only deterministic missing tags, without transcoding audio."""
     suffix = path.suffix.lower()
@@ -59,18 +76,7 @@ def repair_tags(path: Path, *, single: bool = False) -> tuple[str, ...]:
                 tags = ID3(path)
             except ID3NoHeaderError:
                 tags = ID3()
-            artist = _text(tags, "TPE1")
-            if not _text(tags, "TPE2") and artist:
-                tags.add(TPE2(encoding=3, text=[artist]))
-                changes.append(f"{path.name}: album artist = {artist}")
-            match = _TRACK_PREFIX.match(path.name)
-            if not _text(tags, "TRCK") and (single or match):
-                track = "1/1" if single else str(int(match.group(1) if match else 1))
-                tags.add(TRCK(encoding=3, text=[track]))
-                changes.append(f"{path.name}: track = {track}")
-            if not _text(tags, "TPOS"):
-                tags.add(TPOS(encoding=3, text=["1/1"]))
-                changes.append(f"{path.name}: disc = 1/1")
+            changes.extend(_id3_defaults(tags, path, single=single))
             if changes:
                 tags.save(path)
             return tuple(changes)
@@ -93,18 +99,7 @@ def repair_tags(path: Path, *, single: bool = False) -> tuple[str, ...]:
                 audio.add_tags()
             tags = audio.tags
             assert tags is not None
-            artist = _text(tags, "TPE1")
-            if not _text(tags, "TPE2") and artist:
-                tags.add(TPE2(encoding=3, text=[artist]))
-                changes.append(f"{path.name}: album artist = {artist}")
-            match = _TRACK_PREFIX.match(path.name)
-            if not _text(tags, "TRCK") and (single or match):
-                track = "1/1" if single else str(int(match.group(1) if match else 1))
-                tags.add(TRCK(encoding=3, text=[track]))
-                changes.append(f"{path.name}: track = {track}")
-            if not _text(tags, "TPOS"):
-                tags.add(TPOS(encoding=3, text=["1/1"]))
-                changes.append(f"{path.name}: disc = 1/1")
+            changes.extend(_id3_defaults(tags, path, single=single))
         elif suffix == ".m4a":
             tags = audio.tags
             if tags is None:

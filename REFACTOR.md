@@ -380,3 +380,16 @@ delay policy. Tests cover the moved helpers, slag presentation, progress streams
 delay, and cleanup after a scan exception. No user vault was used.
 Phase 4 checks: baseline 115 tests and Ruff lint passed; final full suite
 (118 tests), Ruff lint, CLI help, and `git diff --check` passed.
+
+Phase 5 is complete. Import validation now reports immutable findings with stable
+codes, messages, and optional relative paths; `ImportValidationError.blockers`
+retains the original display strings. Album-artist confirmation uses the finding
+code and revalidates after acceptance, leaving other blockers in force. MP3 and
+WAV use one helper for ID3 album-artist, track, and disc defaults while retaining
+their separate loading and saving paths. Import state transitions already used
+`dataclasses.replace`, so no state-transition change was needed. Tests cover
+reworded confirmation messages, unrelated blockers, JSON review behavior, and
+MP3/WAV tags, idempotence, and permissions. No user vault was used.
+
+Phase 5 checks: baseline 118 tests and Ruff lint passed; final full suite
+(123 tests), Ruff lint, CLI help, and `git diff --check` passed.

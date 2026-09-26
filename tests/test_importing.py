@@ -2,8 +2,18 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from mutagen.id3 import ID3, TPE1
+from mutagen.wave import WAVE
 
-from muse.importing import abort_plan, apply_plan, load_plan, make_plan, plan_path
+from muse.importing import (
+    ImportValidationError,
+    abort_plan,
+    apply_plan,
+    load_plan,
+    make_plan,
+    plan_path,
+)
+from muse.media_fixup import repair_tags
 
 
 def make_track(
@@ -238,8 +248,10 @@ def test_plan_can_accept_inconsistent_album_artists_durably(tmp_path: Path) -> N
     make_track(source / "01.flac", 1, album_artist="Kenji Kawai")
     make_track(source / "02.flac", 2, album_artist="Kimiko Itoh")
 
-    with pytest.raises(ValueError, match="inconsistent album artist tags"):
+    with pytest.raises(ImportValidationError, match="inconsistent album artist tags") as caught:
         make_plan(root, source, "movies-tv/Soundtrack")
+    assert caught.value.findings[0].code == "inconsistent_album_artist"
+    assert caught.value.blockers == tuple(item.message for item in caught.value.findings)
 
     plan = make_plan(
         root,
@@ -252,6 +264,63 @@ def test_plan_can_accept_inconsistent_album_artists_durably(tmp_path: Path) -> N
     assert "Kenji Kawai, Kimiko Itoh" in plan.warnings[0]
     completed = apply_plan(root, source)
     assert completed.state == "completed"
+
+
+def test_accepting_album_artists_keeps_other_validation_blockers(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = root / "backlog" / "soundtrack"
+    source.mkdir(parents=True)
+    make_track(source / "01.flac", 1, album="First", album_artist="One")
+    make_track(source / "02.flac", 2, album="Second", album_artist="Two")
+
+    with pytest.raises(ImportValidationError) as caught:
+        make_plan(root, source, "movies-tv/Soundtrack", accept_inconsistent_album_artists=True)
+
+    assert [finding.code for finding in caught.value.findings] == ["inconsistent_album"]
+    assert not list((root / ".muse" / "imports").glob("*.json"))
+
+
+@pytest.mark.parametrize("extension", ["mp3", "wav"])
+def test_id3_defaults_preserve_permissions_and_existing_tags(
+    tmp_path: Path, extension: str
+) -> None:
+    track = tmp_path / f"07 Song.{extension}"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=0.05",
+            "-metadata",
+            "artist=Artist",
+            str(track),
+        ],
+        check=True,
+    )
+    if extension == "wav":
+        audio = WAVE(track)
+        if audio.tags is None:
+            audio.add_tags()
+        assert audio.tags is not None
+        audio.tags.add(TPE1(encoding=3, text=["Artist"]))
+        audio.save()
+    track.chmod(0o444)
+
+    assert repair_tags(track) == (
+        f"{track.name}: album artist = Artist",
+        f"{track.name}: track = 7",
+        f"{track.name}: disc = 1/1",
+    )
+    tags = ID3(track) if extension == "mp3" else WAVE(track).tags
+    assert tags is not None
+    assert str(tags["TPE2"]) == "Artist"
+    assert str(tags["TRCK"]) == "7"
+    assert str(tags["TPOS"]) == "1/1"
+    assert track.stat().st_mode & 0o777 == 0o444
+    assert repair_tags(track) == ()
 
 
 def test_import_refuses_changed_or_non_audio_content(tmp_path: Path) -> None:

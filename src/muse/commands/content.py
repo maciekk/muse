@@ -182,9 +182,9 @@ def _make_import_plan_with_confirmation(
     except ImportValidationError as error:
         issue = next(
             (
-                blocker
-                for blocker in error.blockers
-                if blocker.startswith("inconsistent album artist tags:")
+                finding.message
+                for finding in error.findings
+                if finding.code == "inconsistent_album_artist"
             ),
             None,
         )

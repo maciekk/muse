@@ -33,12 +33,20 @@ SCHEMA_VERSION = 3
 SUPPORTED_IMPORT_EXTENSIONS = frozenset({".flac", ".m4a", ".mp3", ".ogg", ".oga", ".opus", ".wav"})
 
 
+@dataclass(frozen=True)
+class ImportFinding:
+    code: str
+    message: str
+    path: str | None = None
+
+
 class ImportValidationError(ValueError):
     """All readiness blockers found while inspecting an import source."""
 
-    def __init__(self, blockers: list[str]) -> None:
-        self.blockers = tuple(blockers)
-        super().__init__("import is not ready:\n- " + "\n- ".join(blockers))
+    def __init__(self, findings: list[ImportFinding]) -> None:
+        self.findings = tuple(findings)
+        self.blockers = tuple(finding.message for finding in findings)
+        super().__init__("import is not ready:\n- " + "\n- ".join(self.blockers))
 
 
 @dataclass(frozen=True)
@@ -154,14 +162,19 @@ def plan_path(root: Path, source: Path | None = None) -> Path:
     return paths[0]
 
 
-def _album_blockers(
+def _album_findings(
     files: list[ImportFile], *, accept_inconsistent_album_artists: bool = False
-) -> list[str]:
-    blockers: list[str] = []
+) -> list[ImportFinding]:
+    findings: list[ImportFinding] = []
     for field, label in (("album", "album"), ("album_artist", "album artist")):
         values = {getattr(item.media, field) for item in files}
         if len(values) > 1 and not (field == "album_artist" and accept_inconsistent_album_artists):
-            blockers.append(f"inconsistent {label} tags: {', '.join(sorted(values))}")
+            findings.append(
+                ImportFinding(
+                    f"inconsistent_{field}",
+                    f"inconsistent {label} tags: {', '.join(sorted(values))}",
+                )
+            )
 
     positions: dict[tuple[int, int], list[str]] = {}
     by_disc: dict[int, list[ImportFile]] = {}
@@ -171,28 +184,50 @@ def _album_blockers(
         by_disc.setdefault(item.media.disc_number, []).append(item)
     for (disc, track), paths in sorted(positions.items()):
         if len(paths) > 1:
-            blockers.append(f"duplicate disc {disc} track {track}: {', '.join(paths)}")
+            findings.append(
+                ImportFinding(
+                    "duplicate_track", f"duplicate disc {disc} track {track}: {', '.join(paths)}"
+                )
+            )
     discs = sorted(by_disc)
     if discs != list(range(1, max(discs, default=0) + 1)):
-        blockers.append(f"disc numbering has gaps: {', '.join(map(str, discs))}")
+        findings.append(
+            ImportFinding("disc_gaps", f"disc numbering has gaps: {', '.join(map(str, discs))}")
+        )
     for disc, items in sorted(by_disc.items()):
         tracks = sorted(item.media.track_number for item in items)
         if tracks != list(range(1, max(tracks, default=0) + 1)):
-            blockers.append(f"disc {disc} track numbering has gaps: {', '.join(map(str, tracks))}")
+            findings.append(
+                ImportFinding(
+                    "track_gaps",
+                    f"disc {disc} track numbering has gaps: {', '.join(map(str, tracks))}",
+                )
+            )
         totals = {item.media.track_total for item in items if item.media.track_total is not None}
         if len(totals) > 1 or (totals and next(iter(totals)) != max(tracks)):
-            blockers.append(f"disc {disc} has inconsistent track totals")
+            findings.append(
+                ImportFinding("track_totals", f"disc {disc} has inconsistent track totals")
+            )
     disc_totals = {item.media.disc_total for item in files if item.media.disc_total is not None}
     if len(disc_totals) > 1 or (disc_totals and next(iter(disc_totals)) != max(discs)):
-        blockers.append("album has inconsistent disc totals")
+        findings.append(ImportFinding("disc_totals", "album has inconsistent disc totals"))
 
     years = {item.media.year for item in files if item.media.year is not None}
     if len(years) > 1:
-        blockers.append(f"inconsistent year tags: {', '.join(sorted(years))}")
+        findings.append(
+            ImportFinding(
+                "inconsistent_year", f"inconsistent year tags: {', '.join(sorted(years))}"
+            )
+        )
     release_ids = {item.media.release_id for item in files if item.media.release_id is not None}
     if len(release_ids) > 1:
-        blockers.append(f"inconsistent release identifiers: {', '.join(sorted(release_ids))}")
-    return blockers
+        findings.append(
+            ImportFinding(
+                "inconsistent_release_id",
+                f"inconsistent release identifiers: {', '.join(sorted(release_ids))}",
+            )
+        )
+    return findings
 
 
 def _inventory(
@@ -214,8 +249,14 @@ def _inventory(
     )
     files: list[ImportFile] = []
     artifacts: list[ImportArtifact] = []
-    blockers: list[str] = [
-        f"{item.path}: {item.message}" for item in entries if isinstance(item, WalkError)
+    findings: list[ImportFinding] = [
+        ImportFinding(
+            "walk_error",
+            f"{item.path}: {item.message}",
+            item.path.relative_to(source).as_posix() if item.path.is_relative_to(source) else None,
+        )
+        for item in entries
+        if isinstance(item, WalkError)
     ]
     for entry in candidates:
         path = entry.path
@@ -224,12 +265,18 @@ def _inventory(
         relative = "." if source_is_file else path.relative_to(source).as_posix()
         display = path.name if source_is_file else relative
         if entry.kind == "symlink":
-            blockers.append(f"symbolic links are not supported: {display}")
+            findings.append(
+                ImportFinding("symlink", f"symbolic links are not supported: {display}", relative)
+            )
             continue
         if entry.kind == "directory":
             continue
         if entry.kind != "file":
-            blockers.append(f"special files are not supported: {display}")
+            findings.append(
+                ImportFinding(
+                    "special_file", f"special files are not supported: {display}", relative
+                )
+            )
             continue
         extension = path.suffix.lower()
         if extension not in AUDIO_EXTENSIONS:
@@ -237,23 +284,37 @@ def _inventory(
                 try:
                     stat = path.stat()
                     if stat.st_size == 0:
-                        blockers.append(f"empty cover image: {display}")
+                        findings.append(
+                            ImportFinding("empty_cover", f"empty cover image: {display}", relative)
+                        )
                     else:
                         artifacts.append(
                             ImportArtifact(relative, stat.st_size, sha256_file(path), "cover")
                         )
                 except OSError as error:
-                    blockers.append(f"{display}: {error}")
+                    findings.append(ImportFinding("cover_error", f"{display}: {error}", relative))
             else:
-                blockers.append(f"unsupported non-audio file: {display}")
+                findings.append(
+                    ImportFinding(
+                        "non_audio_file", f"unsupported non-audio file: {display}", relative
+                    )
+                )
             continue
         if extension not in SUPPORTED_IMPORT_EXTENSIONS:
-            blockers.append(f"unsupported audio format: {display} ({extension})")
+            findings.append(
+                ImportFinding(
+                    "unsupported_audio",
+                    f"unsupported audio format: {display} ({extension})",
+                    relative,
+                )
+            )
             continue
         try:
             stat = path.stat()
             if stat.st_size == 0:
-                blockers.append(f"empty audio file: {display}")
+                findings.append(
+                    ImportFinding("empty_audio", f"empty audio file: {display}", relative)
+                )
                 continue
             media = inspect_media(path)
             sha256 = sha256_file(path)
@@ -261,23 +322,31 @@ def _inventory(
             identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
             after_identity = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
             if identity != after_identity:
-                blockers.append(f"file changed while it was being inspected: {display}")
+                findings.append(
+                    ImportFinding(
+                        "file_changed",
+                        f"file changed while it was being inspected: {display}",
+                        relative,
+                    )
+                )
                 continue
             files.append(ImportFile(relative, stat.st_size, sha256, media))
         except (OSError, MediaInspectionError) as error:
             details = error.errors if isinstance(error, MediaInspectionError) else (str(error),)
-            blockers.extend(f"{display}: {detail}" for detail in details)
-    if not files and not blockers:
-        blockers.append("source contains no audio files")
+            findings.extend(
+                ImportFinding("media_error", f"{display}: {detail}", relative) for detail in details
+            )
+    if not files and not findings:
+        findings.append(ImportFinding("no_audio", "source contains no audio files"))
     if files and validate_release:
-        blockers.extend(
-            _album_blockers(
+        findings.extend(
+            _album_findings(
                 files,
                 accept_inconsistent_album_artists=accept_inconsistent_album_artists,
             )
         )
-    if blockers:
-        raise ImportValidationError(blockers)
+    if findings:
+        raise ImportValidationError(findings)
     return tuple(files), tuple(artifacts)
 
 
