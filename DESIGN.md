@@ -41,7 +41,8 @@ master/
 ├── artists/
 │   └── Artist/
 │       ├── Album/                         # complete release
-│       ├── singles/Single Title/          # actual standalone release
+│       ├── singles/Single Title/          # standalone release with its own directory
+│       ├── mixes/Single Title.flac         # standalone releases sharing a directory
 │       └── selections/Album/
 │           └── 07 - Selected Track.flac   # retained from an incomplete album
 └── games/
@@ -56,16 +57,16 @@ An official one-track single remains a release and belongs under the credited ar
 
 Paths provide one stable browsing axis, not every possible classification. Artist, source work, game, remixer, and release relationships should remain in metadata where the format and catalogue support them rather than being duplicated into increasingly elaborate directory trees.
 
-Even one audio file should normally occupy its own directory as the canonical import unit. This leaves a stable place for artwork, source notes, cue sheets, alternate versions, and later repairs. It does not turn that directory into an album.
+A single may occupy its own directory when it needs a stable place for artwork, source notes, cue sheets, alternate versions, or later repairs. Singles may also be stored directly in a shared human-oriented directory, such as `mixes/`, when that avoids needless traversal. Both the directory and the audio file are valid canonical import units; nearby files in a shared directory are not implicitly part of the same release.
 
 Release import and individual-track import require distinct validation profiles:
 
 - A release profile requires coherent album identity and contiguous disc and track numbering for the imported release.
 - A selection profile validates tracks independently. It requires at least title and artist, preserves real album metadata when known, and accepts an original position such as track `7/12` without requiring tracks 1–6 to be present.
 - A standalone-single profile may use release validation when it is genuinely tagged as a one-track release, normally track `1/1`.
-- Reports and durable plans must identify the selected profile and whether content represents a complete release, a standalone single, or a selection.
+- Reports and durable plans must identify the selected profile and whether content represents a complete release, a standalone single, or a selection. A standalone single may be imported either as a one-file directory or as the audio file itself; file imports can be added independently to a shared destination directory.
 
-The initial importer remains deliberately release-shaped: it requires album and album-artist tags and contiguous numbering beginning at one. Consequently, a genuine `1/1` single can be imported today, while an untouched `7/12` album selection is expected to block. Future selection support must add the separate profile rather than weakening release-coherence checks or asking users to falsify tags.
+The initial importer remains deliberately release-shaped: it requires album and album-artist tags and contiguous numbering beginning at one. A genuine `1/1` single can be imported as either a directory or a file. Importing individual files into an existing shared directory allows unrelated singles to coexist without treating the directory as one release. An untouched `7/12` album selection is expected to block. Future selection support must add the separate profile rather than weakening release-coherence checks or asking users to falsify tags.
 
 ## Command grammar and discoverability
 

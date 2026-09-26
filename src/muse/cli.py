@@ -287,9 +287,9 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     command("help", "show help for Muse or one command")
 
     import_command = command(
-        "import", "strictly validate, plan, or apply an album import into master"
+        "import", "strictly validate, plan, or apply a release or single import into master"
     )
-    import_command.add_argument("source", help="directory beneath backlog to import")
+    import_command.add_argument("source", help="file or directory beneath backlog to import")
     import_command.add_argument(
         "destination",
         nargs="?",
@@ -1752,6 +1752,7 @@ def _show_import_plan(console: Any, plan: Any) -> None:
         ("METRIC", "VALUE"),
         [
             ("Status", plan.state),
+            ("Profile", plan.profile),
             ("Validated audio files", human_number(len(plan.files))),
             ("Duration", human_duration(plan.duration_seconds)),
             ("Logical size", human_bytes(plan.logical_bytes)),

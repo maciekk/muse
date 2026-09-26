@@ -47,7 +47,7 @@ def test_every_command_help_starts_with_a_summary(capsys) -> None:
         "diff": "Compare two directory trees exactly.",
         "compact": "Plan exact duplicate-tree compaction.",
         "help": "Show help for Muse or one command.",
-        "import": "Strictly validate, plan, or apply an album import into master.",
+        "import": "Strictly validate, plan, or apply a release or single import into master.",
         "mv": "Move content and preserve cached hashes.",
         "slag": "Inspect or move non-audio backlog artifacts.",
     }

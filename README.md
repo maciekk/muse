@@ -119,9 +119,10 @@ Duplicate reporting rules:
 ### Plan and apply library changes
 
 ```bash
-muse import backlog/album games/album # create a durable import plan
-muse import backlog/album --apply     # reverify and move it into master
-muse import backlog/album --abort     # discard a ready import plan
+muse import backlog/album games/album         # plan a release-directory import
+muse import backlog/mixes/song.flac games/mixes/ # plan a single into a shared directory
+muse import backlog/album --apply             # reverify and move it into master
+muse import backlog/album --abort             # discard a ready import plan
 
 muse compact [backlog]                # create the sole compaction plan
 muse compact backlog --prefer backlog/archive-a --prefer backlog/archive-b
@@ -133,14 +134,15 @@ muse mv old-path new-path             # move content and preserve cached hashes
 
 #### Import
 
-The initial `import` implementation accepts only nonempty, audio-only directories beneath `backlog/`. It:
+The initial `import` implementation accepts nonempty, audio-only directories and individual audio files beneath `backlog/`. It:
 
 - uses ffprobe and ffmpeg to recognize and fully decode MP3, M4A (AAC or Apple Lossless), Ogg Vorbis/Opus, common PCM WAV, and FLAC;
-- checks essential tags and album numbering;
+- checks essential tags and release numbering;
+- identifies genuine one-track releases as standalone singles;
 - reports mixed codecs, sample rates, or bit depths but preserves them as-is; and
 - runs the native FLAC integrity check when available.
 
-Import does not edit tags, embed artwork, or classify artifacts. A destination is required to create a plan, and only `--apply` moves the planned directory into `master/`.
+Import does not edit tags, embed artwork, or classify artifacts. A destination is required to create a plan, and only `--apply` moves the planned file or directory into `master/`. A file may target an existing shared directory (its filename is appended) or an exact new filename with the same extension. This supports both directory-wrapped singles and independently imported singles grouped in a human-friendly directory.
 
 #### Compaction
 

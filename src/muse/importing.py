@@ -13,7 +13,7 @@ from typing import Any
 from muse.media import MediaInfo, MediaInspectionError, inspect_media
 from muse.repository import AUDIO_EXTENSIONS
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SUPPORTED_IMPORT_EXTENSIONS = frozenset({".flac", ".m4a", ".mp3", ".ogg", ".oga", ".opus", ".wav"})
 
 
@@ -41,6 +41,7 @@ class ImportPlan:
     schema_version: int
     source: str
     destination: str
+    profile: str
     state: str
     created_at: str
     files: tuple[ImportFile, ...]
@@ -92,7 +93,7 @@ def _relative_source(root: Path, source: Path) -> str:
     source = source.absolute()
     backlog = root / "backlog"
     if source == backlog or not source.is_relative_to(backlog):
-        raise ValueError("source must be a directory below backlog/")
+        raise ValueError("source must be a file or directory below backlog/")
     _reject_symlink_ancestors(root, source)
     return source.relative_to(root).as_posix()
 
@@ -156,32 +157,35 @@ def _album_blockers(files: list[ImportFile]) -> list[str]:
 def _inventory(source: Path) -> tuple[ImportFile, ...]:
     if not source.exists():
         raise ValueError("source does not exist")
-    if not source.is_dir() or source.is_symlink():
-        raise ValueError("source must be a real directory")
+    if source.is_symlink() or not (source.is_file() or source.is_dir()):
+        raise ValueError("source must be a real file or directory")
 
+    source_is_file = source.is_file()
+    candidates = [source] if source_is_file else sorted(source.rglob("*"))
     files: list[ImportFile] = []
     blockers: list[str] = []
-    for path in sorted(source.rglob("*")):
-        relative = path.relative_to(source).as_posix()
+    for path in candidates:
+        relative = "." if source_is_file else path.relative_to(source).as_posix()
+        display = path.name if source_is_file else relative
         if path.is_symlink():
-            blockers.append(f"symbolic links are not supported: {relative}")
+            blockers.append(f"symbolic links are not supported: {display}")
             continue
         if path.is_dir():
             continue
         if not path.is_file():
-            blockers.append(f"special files are not supported: {relative}")
+            blockers.append(f"special files are not supported: {display}")
             continue
         extension = path.suffix.lower()
         if extension not in AUDIO_EXTENSIONS:
-            blockers.append(f"non-audio files are not supported yet: {relative}")
+            blockers.append(f"non-audio files are not supported yet: {display}")
             continue
         if extension not in SUPPORTED_IMPORT_EXTENSIONS:
-            blockers.append(f"unsupported audio format: {relative} ({extension})")
+            blockers.append(f"unsupported audio format: {display} ({extension})")
             continue
         try:
             stat = path.stat()
             if stat.st_size == 0:
-                blockers.append(f"empty audio file: {relative}")
+                blockers.append(f"empty audio file: {display}")
                 continue
             media = inspect_media(path)
             sha256 = _hash(path)
@@ -189,12 +193,12 @@ def _inventory(source: Path) -> tuple[ImportFile, ...]:
             identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
             after_identity = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
             if identity != after_identity:
-                blockers.append(f"file changed while it was being inspected: {relative}")
+                blockers.append(f"file changed while it was being inspected: {display}")
                 continue
             files.append(ImportFile(relative, stat.st_size, sha256, media))
         except (OSError, MediaInspectionError) as error:
             details = error.errors if isinstance(error, MediaInspectionError) else (str(error),)
-            blockers.extend(f"{relative}: {detail}" for detail in details)
+            blockers.extend(f"{display}: {detail}" for detail in details)
     if not files and not blockers:
         blockers.append("source contains no audio files")
     if files:
@@ -232,6 +236,8 @@ def _destination(root: Path, source: Path, value: str | Path) -> Path:
         destination /= source.name
     if destination.exists():
         raise ValueError("final destination already exists")
+    if source.is_file() and destination.suffix.lower() != source.suffix.lower():
+        raise ValueError("a file destination must preserve the source extension")
     if not destination.parent.is_dir():
         raise ValueError("destination parent does not exist")
     _reject_symlink_ancestors(root, destination.parent)
@@ -250,19 +256,28 @@ def _write(path: Path, plan: ImportPlan) -> None:
 
 
 def make_plan(root: Path, source: Path, destination: str | Path) -> ImportPlan:
-    """Validate an album and create or replace its one ready import plan."""
+    """Validate a release or single and create or replace its one ready import plan."""
     source_text = _relative_source(root, source)
     destination_path = _destination(root, source, destination)
     path = root / ".muse" / "imports" / _plan_key(source_text)
     if path.exists() and load_plan(root, source).state == "applying":
         raise ValueError("an applying import plan cannot be replaced")
+    files = _inventory(source)
+    media = files[0].media if len(files) == 1 else None
+    standalone = media is not None and (
+        media.track_number == 1
+        and media.track_total in {None, 1}
+        and media.disc_number == 1
+        and media.disc_total in {None, 1}
+    )
     plan = ImportPlan(
         schema_version=SCHEMA_VERSION,
         source=source_text,
         destination=destination_path.relative_to(root).as_posix(),
+        profile="standalone-single" if standalone else "release",
         state="ready",
         created_at=datetime.now(UTC).isoformat(),
-        files=_inventory(source),
+        files=files,
     )
     _write(path, plan)
     return plan
@@ -282,6 +297,7 @@ def load_plan(root: Path, source: Path) -> ImportPlan:
         schema_version=value["schema_version"],
         source=value["source"],
         destination=value["destination"],
+        profile=value["profile"],
         state=value["state"],
         created_at=value["created_at"],
         files=tuple(
@@ -306,7 +322,7 @@ def _verify(directory: Path, expected: tuple[ImportFile, ...]) -> None:
 
 
 def apply_plan(root: Path, source: Path) -> ImportPlan:
-    """Revalidate and atomically rename a ready album directory into master."""
+    """Revalidate and atomically rename a ready release or single into master."""
     path = plan_path(root, source)
     plan = load_plan(root, source)
     source_path = root / plan.source

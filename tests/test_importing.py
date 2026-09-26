@@ -62,6 +62,7 @@ def test_plan_and_apply_audio_only_import(tmp_path: Path) -> None:
     assert plan.source == "backlog/album"
     assert plan.destination == "master/games/album"
     assert plan.state == "ready"
+    assert plan.profile == "release"
     assert len(plan.files) == 2
     assert source.is_dir()
 
@@ -74,6 +75,56 @@ def test_plan_and_apply_audio_only_import(tmp_path: Path) -> None:
     assert plan.files[0].media.track_number == 1
     assert not plan_path(root, source).exists()
     assert list((root / ".muse" / "audit").glob("import-*.json"))
+
+
+def test_plan_and_apply_single_file_into_shared_directory(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = root / "backlog" / "mixes" / "song.flac"
+    source.parent.mkdir(parents=True)
+    make_track(source, 1, total=1)
+    destination = root / "master" / "games" / "mixes"
+    destination.mkdir(parents=True)
+
+    plan = make_plan(root, source, "games/mixes")
+
+    assert plan.source == "backlog/mixes/song.flac"
+    assert plan.destination == "master/games/mixes/song.flac"
+    assert plan.profile == "standalone-single"
+    assert plan.files[0].path == "."
+
+    completed = apply_plan(root, source)
+
+    assert completed.state == "completed"
+    assert not source.exists()
+    assert (destination / "song.flac").is_file()
+    assert source.parent.is_dir()
+
+
+def test_single_file_can_be_renamed_at_an_exact_destination(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = root / "backlog" / "song.flac"
+    source.parent.mkdir(parents=True)
+    make_track(source, 1, total=1)
+    (root / "master" / "artists").mkdir(parents=True)
+
+    plan = make_plan(root, source, "artists/Artist - Song.flac")
+    completed = apply_plan(root, source)
+
+    assert plan.destination == "master/artists/Artist - Song.flac"
+    assert completed.state == "completed"
+    assert (root / plan.destination).is_file()
+
+
+def test_directory_wrapped_single_uses_single_profile(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = root / "backlog" / "single"
+    source.mkdir(parents=True)
+    make_track(source / "song.flac", 1, total=1)
+    (root / "master" / "artists").mkdir(parents=True)
+
+    plan = make_plan(root, source, "artists/single")
+
+    assert plan.profile == "standalone-single"
 
 
 def test_apply_resumes_after_directory_was_renamed(tmp_path: Path) -> None:
