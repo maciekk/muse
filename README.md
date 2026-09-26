@@ -25,6 +25,7 @@ Muse manages one isolated data root:
 ├── incoming/
 ├── backlog/
 ├── slag/
+├── trash/
 └── .muse/
 ```
 
@@ -84,6 +85,8 @@ NO_COLOR=1 muse status
 Machine-readable JSON never contains terminal styling. Potentially slow operations delay their progress display to avoid flicker for quick work, but show it immediately when preflight identifies a large workload. Progress is written to stderr and can be controlled with `--progress auto|always|never`.
 
 `slag/` isolates non-music artifacts moved from backlog for later triage. It retains the original backlog-relative path so provenance remains visible.
+
+Compaction reverifies every planned duplicate tree immediately before mutation, then moves redundant trees into a dated operation receipt beneath `trash/`, preserving their original repository-relative paths. These same-filesystem renames are cheap and recoverable; permanent trash purging is a separate future operation.
 
 ## Design and roadmap
 

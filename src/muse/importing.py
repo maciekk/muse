@@ -199,7 +199,14 @@ def _destination(root: Path, source: Path, value: str | Path) -> Path:
         raise ValueError("destination must be a relative path beneath master/")
     if raw.parts[:1] == ("master",):
         raw = Path(*raw.parts[1:])
-    elif raw.parts and raw.parts[0] in {"backlog", "incoming", "stopgap", "slag", ".muse"}:
+    elif raw.parts and raw.parts[0] in {
+        "backlog",
+        "incoming",
+        "stopgap",
+        "slag",
+        "trash",
+        ".muse",
+    }:
         raise ValueError("destination must be beneath master/")
     if not raw.parts:
         raise ValueError("destination must name a path beneath master/")

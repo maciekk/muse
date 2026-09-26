@@ -8,6 +8,7 @@ import platform
 import shutil
 import sys
 from collections.abc import Sequence
+from difflib import SequenceMatcher
 from functools import partial
 from pathlib import Path
 from time import monotonic
@@ -26,7 +27,7 @@ from rich_argparse import RichHelpFormatter
 
 from muse import __version__
 from muse.cache import CachePruneReport, prune_missing
-from muse.compaction import apply_plan, load_plan, make_plan, save_plan
+from muse.compaction import CompactProgress, apply_plan, load_plan, make_plan, save_plan
 from muse.config import MANAGED_AREAS, MASTER_SHELVES, resolve_root, resolve_target
 from muse.duplicates import DuplicateGroup, DuplicateReport, ProgressUpdate, find_duplicates
 from muse.importing import abort_plan as abort_import_plan
@@ -814,18 +815,93 @@ def _diff(args: argparse.Namespace, root: Path) -> int:
     return 1 if report.errors else 0
 
 
+class _CompactProgressDisplay:
+    """Operation-level progress for compaction verification and trash moves."""
+
+    def __init__(self, color: str) -> None:
+        self.console = make_console(color, stderr=True)
+        self.enabled = sys.stderr.isatty()
+        self.phase: str | None = None
+        self.task_id: int | None = None
+        self.progress = Progress(
+            SpinnerColumn(),
+            TextColumn("{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=self.console,
+            transient=True,
+        )
+        self.running = False
+
+    def update(self, update: CompactProgress) -> None:
+        if not self.enabled:
+            return
+        if not self.running:
+            self.progress.start()
+            self.running = True
+        if update.phase != self.phase:
+            if self.task_id is not None:
+                self.progress.remove_task(self.task_id)
+            description = (
+                "Reverifying duplicate trees"
+                if update.phase == "verify"
+                else "Moving duplicate trees to trash"
+            )
+            self.task_id = self.progress.add_task(description, total=update.total_operations)
+            self.phase = update.phase
+        if self.task_id is not None:
+            self.progress.update(
+                self.task_id,
+                completed=update.completed_operations,
+                total=update.total_operations,
+            )
+
+    def stop(self) -> None:
+        if self.running:
+            self.progress.stop()
+            self.running = False
+
+
 def _compact_rows(operations: list[Any]) -> list[tuple[str, str]]:
     return [
-        ("Trees to remove", human_number(len(operations))),
-        ("Files to remove", human_number(sum(operation.files for operation in operations))),
+        ("Trees to trash", human_number(len(operations))),
+        ("Files to trash", human_number(sum(operation.files for operation in operations))),
         (
-            "Logical bytes reclaimed",
+            "Logical bytes to trash",
             human_bytes(sum(operation.logical_bytes for operation in operations)),
         ),
     ]
 
 
-def _show_compact_plan(console: Any, operations: list[Any]) -> None:
+def _compact_path_texts(remove: str, retain: str) -> tuple[Text, Text]:
+    """Emphasize changed path components while dimming shared context."""
+    remove_parts = Path(remove).parts
+    retain_parts = Path(retain).parts
+    remove_shared: set[int] = set()
+    retain_shared: set[int] = set()
+    matcher = SequenceMatcher(a=remove_parts, b=retain_parts, autojunk=False)
+    for block in matcher.get_matching_blocks():
+        remove_shared.update(range(block.a, block.a + block.size))
+        retain_shared.update(range(block.b, block.b + block.size))
+
+    def render(parts: tuple[str, ...], shared: set[int], difference_style: str) -> Text:
+        text = Text()
+        for index, part in enumerate(parts):
+            style = "dim" if index in shared else difference_style
+            if index:
+                text.append("/", style=style)
+            text.append(part, style=style)
+        return text
+
+    return (
+        render(remove_parts, remove_shared, "bold red"),
+        render(retain_parts, retain_shared, "bold green"),
+    )
+
+
+def _show_compact_plan(
+    console: Any, operations: list[Any], *, limit: int | None = 10
+) -> None:
     print_table(
         console,
         ("METRIC", "VALUE"),
@@ -833,20 +909,26 @@ def _show_compact_plan(console: Any, operations: list[Any]) -> None:
         right_aligned=frozenset({"VALUE"}),
     )
     if operations:
+        if limit is None:
+            displayed = sorted(operations, key=lambda item: (item.remove.casefold(), item.remove))
+            heading = "Planned trash moves"
+        else:
+            displayed = operations[:limit]
+            heading = "Largest trash moves"
         rows = [
-            (human_bytes(item.logical_bytes), item.remove, item.retain)
-            for item in operations[:10]
+            (human_bytes(item.logical_bytes), *_compact_path_texts(item.remove, item.retain))
+            for item in displayed
         ]
-        console.print("[bold]Largest removals[/bold]")
+        console.print(f"[bold]{heading}[/bold]")
         print_table(
             console,
-            ("BYTES", "REMOVE", "RETAIN"),
+            ("BYTES", "MOVE TO TRASH", "RETAIN"),
             rows,
             right_aligned=frozenset({"BYTES"}),
         )
         if len(operations) > len(rows):
             remaining = human_number(len(operations) - len(rows))
-            console.print(f"[dim]{remaining} more removals in the plan.[/dim]")
+            console.print(f"[dim]{remaining} more trash moves in the plan.[/dim]")
 
 
 def _compact(args: argparse.Namespace, root: Path) -> int:
@@ -860,7 +942,7 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
         except FileNotFoundError:
             console.print("[yellow]No pending compact plan.[/yellow]")
             return 1
-        _show_compact_plan(console, operations)
+        _show_compact_plan(console, operations, limit=None)
         return 0
     if args.apply:
         try:
@@ -869,16 +951,27 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
             console.print("[yellow]No pending compact plan.[/yellow]")
             return 1
         _show_compact_plan(console, operations)
-        confirmation = input("Type DELETE to apply this plan: ")
-        if confirmation != "DELETE":
+        confirmation = input("Type TRASH to apply this plan: ")
+        if confirmation != "TRASH":
             console.print("[yellow]Compaction cancelled.[/yellow]")
             return 1
+        console.print("[dim]Reverifying planned trees before moving them to trash…[/dim]")
+        progress = _CompactProgressDisplay(args.color)
         try:
-            apply_plan(root, operations)
+            receipt = apply_plan(root, operations, progress.update)
         except ValueError as error:
             console.print(f"[red]Compaction refused:[/red] {error}")
             return 1
-        console.print("[green]Compaction applied; audit plan saved in .muse/audit/.[/green]")
+        finally:
+            progress.stop()
+        if receipt is not None:
+            console.print(
+                f"[green]Compaction applied; removed trees moved to "
+                f"{receipt.relative_to(root)}/.[/green]"
+            )
+        else:
+            console.print("[green]Compaction applied; the plan contained no trash moves.[/green]")
+        console.print("[dim]Audit plan saved in .muse/audit/.[/dim]")
         return 0
 
     console.print("[bold]Exact-tree compaction plan[/bold]")
@@ -895,7 +988,7 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
     save_plan(root, operations)
     _show_compact_plan(console, operations)
     console.print(
-        "[dim]No files were changed. Review: muse compact show; apply: muse compact apply[/dim]"
+        "[dim]No files were changed. Review: muse compact --show; apply: muse compact --apply[/dim]"
     )
     return 0
 

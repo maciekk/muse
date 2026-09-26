@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from muse.cli import main
+from muse.cli import _compact_path_texts, main
 from muse.config import MANAGED_AREAS, MASTER_SHELVES
 
 
@@ -210,6 +210,78 @@ def test_dupes_trees_reports_maximal_directory_copies(tmp_path: Path, capsys) ->
     assert result == 0
     assert "Maximal duplicate directory trees" in output
     assert "Duplicate groups" not in output
+
+
+def test_compact_paths_highlight_differences_and_dim_shared_context() -> None:
+    remove, retain = _compact_path_texts("backlog/old/album", "master/album")
+
+    def styled_text(text, style: str) -> str:
+        return "".join(
+            text.plain[span.start : span.end] for span in text.spans if span.style == style
+        )
+
+    assert remove.plain == "backlog/old/album"
+    assert retain.plain == "master/album"
+    assert styled_text(remove, "bold red") == "backlog/old"
+    assert styled_text(retain, "bold green") == "master"
+    assert styled_text(remove, "dim") == "/album"
+    assert styled_text(retain, "dim") == "/album"
+
+
+def test_compact_show_lists_every_planned_removal(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    for index in range(12):
+        directory = root / "backlog" / f"copy-{index:02}"
+        directory.mkdir()
+        (directory / "song.flac").write_bytes(b"same")
+    for prefix, contents in (("aaa", b"a" * 3), ("zzz", b"z" * 100)):
+        for index in range(2):
+            directory = root / "backlog" / f"{prefix}-{index:02}"
+            directory.mkdir()
+            (directory / "song.flac").write_bytes(contents)
+
+    assert main(["--root", str(root), "compact", "backlog"]) == 0
+    plan_output = capsys.readouterr().out
+    assert "muse compact --show" in plan_output
+    assert "muse compact --apply" in plan_output
+
+    result = main(["--root", str(root), "compact", "--show"])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "backlog/copy-01" in output
+    assert "backlog/copy-11" in output
+    assert "more trash moves in the plan" not in output
+    assert (
+        output.index("backlog/aaa-01")
+        < output.index("backlog/copy-01")
+        < output.index("backlog/zzz-01")
+    )
+
+
+def test_compact_apply_announces_reverification(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    for name in ("one", "two"):
+        directory = root / "backlog" / name
+        directory.mkdir()
+        (directory / "song.flac").write_bytes(b"same")
+    assert main(["--root", str(root), "compact", "backlog"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr("builtins.input", lambda _prompt: "TRASH")
+
+    result = main(["--root", str(root), "compact", "--apply"])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "Reverifying planned trees before moving them to trash" in output
+    assert "Compaction applied" in output
+    assert "removed trees moved to" in output
+    assert "trash/" in output
+    assert len(list((root / "trash").glob("*/*/backlog/*/song.flac"))) == 1
 
 
 def test_dupes_shows_shared_filename_once_with_its_directories(tmp_path: Path, capsys) -> None:
