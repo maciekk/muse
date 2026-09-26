@@ -1027,6 +1027,11 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
                 f"[green]Compaction applied; removed trees moved to "
                 f"{receipt.relative_to(root)}/.[/green]"
             )
+            console.print(
+                "[yellow]Removing maximal duplicate trees can expose additional "
+                "duplicates. Create another compact plan with the same scope and "
+                "preferences to check for another pass.[/yellow]"
+            )
         else:
             console.print("[green]Compaction applied; the plan contained no trash moves.[/green]")
         console.print("[dim]Audit plan saved in .muse/audit/.[/dim]")

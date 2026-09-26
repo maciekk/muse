@@ -323,6 +323,8 @@ def test_compact_apply_announces_reverification(
     assert "worker thread" in output
     assert "Compaction applied" in output
     assert "removed trees moved to" in output
+    assert "Removing maximal duplicate trees can expose additional duplicates" in output
+    assert "same scope and preferences" in output
     assert "trash/" in output
     assert len(list((root / "trash").glob("*/*/backlog/*/song.flac"))) == 1
 
