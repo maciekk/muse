@@ -329,7 +329,7 @@ def _collect_hashes(
         )
 
     report.hash_worker_threads = (
-        min(max_threads or 8, uncached_files, os.cpu_count() or 1)
+        min(max_threads or 16, uncached_files, os.cpu_count() or 1)
         if uncached_files
         else 0
     )

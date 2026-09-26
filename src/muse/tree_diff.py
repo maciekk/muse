@@ -223,7 +223,7 @@ def fingerprint_metadata_trees(
     errors: list[ScanError] = []
     if not roots:
         return fingerprints, errors
-    workers = min(max_threads or 8, len(roots), os.cpu_count() or 1)
+    workers = min(max_threads or 16, len(roots), os.cpu_count() or 1)
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="muse-scan") as executor:
         for root, (fingerprint, scan_errors) in zip(
             roots, executor.map(_metadata_fingerprint, roots), strict=True

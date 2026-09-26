@@ -91,7 +91,7 @@ def _add_max_threads_argument(parser: argparse.ArgumentParser) -> None:
         "--max-threads",
         type=_positive_int,
         metavar="N",
-        help="limit concurrent hashing and scanning workers (default: up to 8)",
+        help="limit concurrent hashing and scanning workers (default: up to 16)",
     )
 
 
@@ -994,7 +994,7 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
             {path for item in operations for path in (item.retain, item.remove)}
         )
         workers = (
-            min(args.max_threads or 8, distinct_paths, os.cpu_count() or 1)
+            min(args.max_threads or 16, distinct_paths, os.cpu_count() or 1)
             if distinct_paths
             else 0
         )
@@ -1029,7 +1029,7 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
     except ValueError:
         console.print("[red]Compaction target must be inside the library root.[/red]")
         return 1
-    worker_limit = min(args.max_threads or 8, os.cpu_count() or 1)
+    worker_limit = min(args.max_threads or 16, os.cpu_count() or 1)
     console.print(
         f"[dim]Scanning with up to {worker_limit} worker "
         f"{'thread' if worker_limit == 1 else 'threads'}…[/dim]"

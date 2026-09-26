@@ -200,7 +200,7 @@ def apply_plan(
     paths = [path for _operation, retain, remove in prepared for path in (retain, remove)]
     distinct_paths = len(dict.fromkeys(paths))
     worker_threads = (
-        min(max_threads or 8, distinct_paths, os.cpu_count() or 1) if distinct_paths else 0
+        min(max_threads or 16, distinct_paths, os.cpu_count() or 1) if distinct_paths else 0
     )
     if progress is not None:
         progress(CompactProgress("verify", 0, total, worker_threads=worker_threads))
