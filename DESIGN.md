@@ -256,7 +256,7 @@ A conservative order is:
 5. Move classified artifacts into slag using verified operations.
 6. Remove empty source directories.
 7. Atomically rename the accepted remainder into `master/` when on the same filesystem.
-8. Reconcile matching copies elsewhere in backlog, moving them into the same trash receipt if that action was in the previewed plan.
+8. Prune matching imported copies elsewhere in backlog, moving them into the same trash receipt if that action was in the previewed plan.
 9. Verify the complete desired state.
 10. Write the audit record and retire the current plan.
 
@@ -389,7 +389,7 @@ Actions:
   Move 4 artifacts to slag
   Import 12 audio files
   Remove 2 empty directories
-  Reconcile matching copies elsewhere in backlog
+  Prune matching imported copies elsewhere in backlog
 
 Warnings:
   Mixed FLAC and MP3 encoding accepted
@@ -402,54 +402,81 @@ JSON output should represent the same source, destination, decisions, blockers, 
 
 Progress remains on stderr. Plan/report data remains on stdout.
 
+## Strict usable import milestone
+
+The first production-useful import should be a strict readiness gate, not a metadata editor. Work that users can safely perform with existing tools—correcting tags, choosing artwork, renaming files, or resolving unusual artifacts—should remain user work initially. Muse inspects the prepared source, explains every blocker, and permits import only when the album is ready. This keeps the first trustworthy workflow small without weakening its guarantees.
+
+A successful import must not require returning to the backlog source later. Muse must preserve every accepted audio file and every potentially useful adjacent artifact, together with enough provenance to support later tag or artwork improvements against the canonical copy. Automatic tag rewriting, artwork selection and embedding, destination inference, and broad format support are enhancements rather than prerequisites. If critical tags or policy decisions are unresolved, planning blocks and the user prepares the source externally before rerunning the same command.
+
+The initial supported profile should be deliberately narrow in album shape—one album directory with an explicit destination—but must cover the formats likely to occur in older collections: MP3, Ogg Vorbis/Opus, WAV, and FLAC. Format support means inspecting the actual container and codec, decoding the complete stream, reading the format's applicable metadata, and applying explicit format-specific readiness rules; recognizing a filename extension is not support. Initial WAV support may be limited to common PCM variants, and unsupported or unusual codecs must block with a clear explanation. Expanding accepted inputs must not reduce validation.
+
+An album is ready only when Muse can:
+
+- inventory and account for every filesystem entry;
+- identify actual containers and codecs rather than trust extensions;
+- decode every audio file successfully and perform available codec integrity checks;
+- verify essential tags and coherent album, disc, and track numbering;
+- classify or block every non-audio artifact and verify supported manifests;
+- show a complete durable plan without changing user content;
+- reverify the plan immediately before mutation;
+- preserve all content in `master/`, `slag/`, or `trash/` as planned;
+- verify the final state and retain an audit record.
+
 ## Incremental implementation
 
-This design should be delivered in small vertical slices rather than one large change.
+This design should be delivered in small vertical slices rather than one large change. The sequence toward the strict usable milestone is:
 
-### 1. Trash foundation
-
-- Add `trash/` as a managed area.
-- Define safe receipt allocation and path normalization.
-- Add inventory/status reporting.
-- Implement verified, idempotent move-to-trash primitives.
-- Test collisions and interrupted move recovery.
-
-### 2. Reconciliation
-
-- Separate candidate scope from the `master/` reference scope.
-- Plan exact file matches, not only maximal duplicate trees.
-- Preview and apply moves into dated trash receipts.
-- Remove empty directories.
-- Make repeated and interrupted application safe.
-
-### 3. Minimal import transaction
+### 1. Minimal import transaction
 
 - Parse and normalize source and master-relative destination forms.
 - Enforce one current plan per normalized source.
-- Implement draft/ready/applying/blocked/completed states.
 - Import a clean audio-only directory using an atomic final rename.
 - Resume safely before and after the final rename.
+- Keep extension-based acceptance explicitly provisional; it is not yet a production readiness check.
 
-### 4. Artifact decisions and slag integration
+### 2. Media inspection and readiness reporting
 
-- Inventory every non-audio file.
-- Persist obvious, adjacent, and unknown classifications.
-- Reuse or strengthen verified slag movement.
-- Block on unresolved files.
+- Initially support MP3, Ogg Vorbis/Opus, common PCM WAV, and FLAC as actual container/codec combinations rather than extension labels.
+- Probe actual containers, codecs, duration, sample rate, channels, and bit depth.
+- Decode every track and run format-specific integrity checks where available.
+- Read ID3, Vorbis Comment, WAV-applicable, and FLAC metadata as appropriate; report album-level coherence, track/disc numbering, and blockers.
+- Make metadata requirements capability-aware without silently waiving them: if a format cannot represent or expose a required fact reliably, report the limitation and require an explicit preparation or policy decision.
+- Do not rewrite tags automatically; direct the user to fix blocked sources and re-plan.
+- Add progress and reusable inspection results without mixing them into structured stdout.
 
-### 5. Integrity and coherence checks
+### 3. Artifact inventory and preservation
 
-- Add decoder/container validation.
-- Add album-level tag and track checks.
-- Verify checksums, cue sheets, and playlists where possible.
-- Add warnings for likely non-exact duplicates.
+- Inventory every non-audio file rather than rejecting the album generically.
+- Recognize artwork, checksum manifests, cue sheets, rip logs, playlists, and text metadata.
+- Verify supported manifests and references where possible.
+- Persist content-bound classifications; unknown or unresolved files block application.
+- Preserve useful artifacts with backlog-relative provenance, reusing or strengthening slag movement.
+- Preserve external artwork even when embedded artwork exists so later improvements do not require the backlog source.
 
-### 6. Post-import pruning and trash lifecycle
+### 4. Transaction hardening
 
-- Include previewed global imported-content pruning in import.
-- Add restore and explicit purge.
-- Add age-based purge selection and recent-item warnings.
-- Surface interrupted work in `muse status` and `muse doctor` where appropriate.
+- Complete draft/ready/applying/blocked/completed state handling.
+- Add a repository-level application lock and durable state transitions.
+- Preserve or update cached hash paths when content moves.
+- Reverify all source facts, destinations, and planned artifact movements before applying.
+- Verify every final file and audit record after applying.
+- Add deterministic interruption tests around durable writes and filesystem mutations.
+
+### 5. Real-album acceptance
+
+- Select one representative prepared album as an end-to-end acceptance case.
+- Require Muse to explain every file, validate every track, report metadata blockers, preserve every artifact, and resume safely.
+- Treat successful import of that album without later source reimport as the production-useful milestone.
+- Expand formats and album layouts only through additional acceptance cases.
+
+### 6. Imported-content pruning and trash lifecycle
+
+- Add `trash/` as a managed area with safe receipt allocation and path normalization.
+- Implement verified, idempotent move-to-trash, restore, and explicit purge primitives.
+- Implement `prune-imported` with separate candidate and `master/` reference scopes.
+- Plan exact file matches, move them into dated trash receipts, and remove empty directories.
+- Include optional previewed global imported-content pruning in import.
+- Add age-based purge selection, warnings, and interrupted-work reporting in `status` and `doctor`.
 
 ## Testing requirements
 
