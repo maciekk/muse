@@ -172,12 +172,98 @@ def test_import_refuses_changed_or_non_audio_content(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="changed"):
         apply_plan(root, source)
 
-    other = root / "backlog" / "with-art"
+    other = root / "backlog" / "with-notes"
     other.mkdir()
     make_track(other / "song.flac", 1)
-    (other / "cover.jpg").write_bytes(b"image")
+    (other / "notes.txt").write_text("notes")
     with pytest.raises(ValueError, match="non-audio"):
-        make_plan(root, other, "games/with-art")
+        make_plan(root, other, "games/with-notes")
+
+
+def test_import_repairs_safe_missing_tags_and_preserves_and_embeds_cover(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = root / "backlog" / "album"
+    source.mkdir(parents=True)
+    track = source / "01. Song.mp3"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=0.05",
+            "-metadata",
+            "title=Song",
+            "-metadata",
+            "artist=Artist",
+            "-metadata",
+            "album=Album",
+            str(track),
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=blue:size=16x16",
+            "-frames:v",
+            "1",
+            str(source / "cover.jpg"),
+        ],
+        check=True,
+    )
+    track.chmod(0o555)
+    (root / "master" / "artists").mkdir(parents=True)
+
+    plan = make_plan(root, source, "artists/Artist/Album")
+
+    assert track.stat().st_mode & 0o777 == 0o555
+    assert plan.files[0].media.album_artist == "Artist"
+    assert plan.files[0].media.track_number == 1
+    assert plan.files[0].media.disc_number == 1
+    assert len(plan.artifacts) == 1
+    assert any("embedded cover" in fixup for fixup in plan.fixups)
+
+    apply_plan(root, source)
+    destination = root / "master" / "artists" / "Artist" / "Album"
+    assert (destination / "cover.jpg").is_file()
+    tags = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format_tags",
+            "-of",
+            "json",
+            str(destination / track.name),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "album_artist" in tags
+
+
+def test_file_destination_is_created_as_a_directory(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = root / "backlog" / "song.flac"
+    source.parent.mkdir(parents=True)
+    make_track(source, 1, total=1)
+    (root / "master").mkdir()
+
+    plan = make_plan(root, source, "artists/Artist/selections/Album")
+
+    assert plan.destination == "master/artists/Artist/selections/Album/song.flac"
+    apply_plan(root, source)
+    assert (root / plan.destination).is_file()
 
 
 def test_import_rejects_unsafe_sources_and_destinations(tmp_path: Path) -> None:

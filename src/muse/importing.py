@@ -10,7 +10,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from mutagen import MutagenError
+
 from muse.media import MediaInfo, MediaInspectionError, inspect_media
+from muse.media_fixup import embed_cover, is_obvious_cover, repair_tags
 from muse.repository import AUDIO_EXTENSIONS
 
 SCHEMA_VERSION = 3
@@ -37,6 +40,14 @@ class ImportFile:
 
 
 @dataclass(frozen=True)
+class ImportArtifact:
+    path: str
+    size: int
+    sha256: str
+    kind: str
+
+
+@dataclass(frozen=True)
 class ImportPlan:
     schema_version: int
     source: str
@@ -45,10 +56,12 @@ class ImportPlan:
     state: str
     created_at: str
     files: tuple[ImportFile, ...]
+    artifacts: tuple[ImportArtifact, ...] = ()
+    fixups: tuple[str, ...] = ()
 
     @property
     def logical_bytes(self) -> int:
-        return sum(item.size for item in self.files)
+        return sum(item.size for item in (*self.files, *self.artifacts))
 
     @property
     def duration_seconds(self) -> float:
@@ -74,6 +87,8 @@ class ImportPlan:
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
         value["files"] = [item.to_dict() for item in self.files]
+        value["artifacts"] = [asdict(item) for item in self.artifacts]
+        value["fixups"] = list(self.fixups)
         value["logical_bytes"] = self.logical_bytes
         value["duration_seconds"] = self.duration_seconds
         value["warnings"] = list(self.warnings)
@@ -154,7 +169,9 @@ def _album_blockers(files: list[ImportFile]) -> list[str]:
     return blockers
 
 
-def _inventory(source: Path, *, validate_release: bool = True) -> tuple[ImportFile, ...]:
+def _inventory(
+    source: Path, *, validate_release: bool = True
+) -> tuple[tuple[ImportFile, ...], tuple[ImportArtifact, ...]]:
     if not source.exists():
         raise ValueError("source does not exist")
     if source.is_symlink() or not (source.is_file() or source.is_dir()):
@@ -163,6 +180,7 @@ def _inventory(source: Path, *, validate_release: bool = True) -> tuple[ImportFi
     source_is_file = source.is_file()
     candidates = [source] if source_is_file else sorted(source.rglob("*"))
     files: list[ImportFile] = []
+    artifacts: list[ImportArtifact] = []
     blockers: list[str] = []
     for path in candidates:
         relative = "." if source_is_file else path.relative_to(source).as_posix()
@@ -177,7 +195,19 @@ def _inventory(source: Path, *, validate_release: bool = True) -> tuple[ImportFi
             continue
         extension = path.suffix.lower()
         if extension not in AUDIO_EXTENSIONS:
-            blockers.append(f"non-audio files are not supported yet: {display}")
+            if not source_is_file and is_obvious_cover(path):
+                try:
+                    stat = path.stat()
+                    if stat.st_size == 0:
+                        blockers.append(f"empty cover image: {display}")
+                    else:
+                        artifacts.append(
+                            ImportArtifact(relative, stat.st_size, _hash(path), "cover")
+                        )
+                except OSError as error:
+                    blockers.append(f"{display}: {error}")
+            else:
+                blockers.append(f"unsupported non-audio file: {display}")
             continue
         if extension not in SUPPORTED_IMPORT_EXTENSIONS:
             blockers.append(f"unsupported audio format: {display} ({extension})")
@@ -205,7 +235,37 @@ def _inventory(source: Path, *, validate_release: bool = True) -> tuple[ImportFi
         blockers.extend(_album_blockers(files))
     if blockers:
         raise ImportValidationError(blockers)
-    return tuple(files)
+    return tuple(files), tuple(artifacts)
+
+
+def _prepare(source: Path) -> tuple[str, ...]:
+    """Apply deterministic tag defaults and embed an unambiguous nearby cover."""
+    audio_paths = (
+        [source]
+        if source.is_file()
+        else sorted(
+            path
+            for path in source.rglob("*")
+            if path.is_file() and path.suffix.lower() in SUPPORTED_IMPORT_EXTENSIONS
+        )
+    )
+    covers = (
+        []
+        if source.is_file()
+        else sorted(path for path in source.rglob("*") if path.is_file() and is_obvious_cover(path))
+    )
+    changes: list[str] = []
+    for audio in audio_paths:
+        try:
+            changes.extend(repair_tags(audio))
+            nearby = [cover for cover in covers if cover.parent == audio.parent]
+            if not nearby and source.is_dir():
+                nearby = [cover for cover in covers if cover.parent == source]
+            if len(nearby) == 1 and embed_cover(audio, nearby[0]):
+                changes.append(f"{audio.name}: embedded cover from {nearby[0].name}")
+        except (OSError, MutagenError) as error:
+            raise ValueError(f"automatic fixup failed for {audio.name}: {error}") from error
+    return tuple(changes)
 
 
 def _destination(root: Path, source: Path, value: str | Path) -> Path:
@@ -234,13 +294,19 @@ def _destination(root: Path, source: Path, value: str | Path) -> Path:
         if not destination.is_dir() or destination.is_symlink():
             raise ValueError("destination already exists and is not a directory")
         destination /= source.name
+    elif source.is_file() and destination.suffix.lower() != source.suffix.lower():
+        # A non-audio destination for a file is naturally a collection directory.
+        destination /= source.name
     if destination.exists():
         raise ValueError("final destination already exists")
     if source.is_file() and destination.suffix.lower() != source.suffix.lower():
         raise ValueError("a file destination must preserve the source extension")
-    if not destination.parent.is_dir():
-        raise ValueError("destination parent does not exist")
-    _reject_symlink_ancestors(root, destination.parent)
+    existing_parent = destination.parent
+    while not existing_parent.exists() and existing_parent != root:
+        existing_parent = existing_parent.parent
+    if not existing_parent.is_dir():
+        raise ValueError("destination has a non-directory parent")
+    _reject_symlink_ancestors(root, existing_parent)
     return destination
 
 
@@ -262,7 +328,8 @@ def make_plan(root: Path, source: Path, destination: str | Path) -> ImportPlan:
     path = root / ".muse" / "imports" / _plan_key(source_text)
     if path.exists() and load_plan(root, source).state == "applying":
         raise ValueError("an applying import plan cannot be replaced")
-    files = _inventory(source, validate_release=source.is_dir())
+    fixups = _prepare(source)
+    files, artifacts = _inventory(source, validate_release=source.is_dir())
     media = files[0].media if len(files) == 1 else None
     standalone = media is not None and (
         media.track_number == 1
@@ -284,6 +351,8 @@ def make_plan(root: Path, source: Path, destination: str | Path) -> ImportPlan:
         state="ready",
         created_at=datetime.now(UTC).isoformat(),
         files=files,
+        artifacts=artifacts,
+        fixups=fixups,
     )
     _write(path, plan)
     return plan
@@ -315,15 +384,22 @@ def load_plan(root: Path, source: Path) -> ImportPlan:
             )
             for item in value["files"]
         ),
+        artifacts=tuple(ImportArtifact(**item) for item in value.get("artifacts", [])),
+        fixups=tuple(value.get("fixups", [])),
     )
 
 
-def _verify(path: Path, expected: tuple[ImportFile, ...], profile: str) -> None:
+def _verify(
+    path: Path,
+    expected: tuple[ImportFile, ...],
+    expected_artifacts: tuple[ImportArtifact, ...],
+    profile: str,
+) -> None:
     try:
-        actual = _inventory(path, validate_release=profile != "selection")
+        actual, actual_artifacts = _inventory(path, validate_release=profile != "selection")
     except ImportValidationError as error:
         raise ValueError(f"content has changed since the import was planned: {error}") from error
-    if actual != expected:
+    if actual != expected or actual_artifacts != expected_artifacts:
         raise ValueError("content has changed since the import was planned")
 
 
@@ -343,14 +419,17 @@ def apply_plan(root: Path, source: Path) -> ImportPlan:
     if source_exists:
         if plan.state not in {"ready", "applying"}:
             raise ValueError(f"plan cannot be applied from state {plan.state}")
-        _verify(source_path, plan.files, plan.profile)
-        if not destination.parent.is_dir():
-            raise ValueError("destination parent no longer exists")
+        _verify(source_path, plan.files, plan.artifacts, plan.profile)
         applying = ImportPlan(**{**plan.__dict__, "state": "applying"})
         _write(path, applying)
+        _reject_symlink_ancestors(root, destination.parent)
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise ValueError(f"cannot create destination directories: {error}") from error
         source_path.rename(destination)
         plan = applying
-    _verify(destination, plan.files, plan.profile)
+    _verify(destination, plan.files, plan.artifacts, plan.profile)
 
     completed = ImportPlan(**{**plan.__dict__, "state": "completed"})
     _write(path, completed)

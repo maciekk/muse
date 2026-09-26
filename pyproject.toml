@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Maciek" }]
 dependencies = [
+    "mutagen>=1.47",
     "rich>=14",
     "rich-argparse>=1.7",
 ]

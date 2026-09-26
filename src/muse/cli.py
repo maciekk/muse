@@ -1733,9 +1733,13 @@ def _import(args: argparse.Namespace, root: Path) -> int:
         if action in {"planned", "shown"}:
             _show_import_plan(console, plan)
             if action == "planned":
-                console.print(
-                    "[dim]No music was changed. Apply with muse import SOURCE --apply.[/dim]"
-                )
+                message = "No files were moved. Apply with muse import SOURCE --apply."
+                if plan.fixups:
+                    message = (
+                        "The listed metadata fixups were applied; no files were moved. "
+                        "Apply with muse import SOURCE --apply."
+                    )
+                console.print(f"[dim]{message}[/dim]")
         elif action == "aborted":
             console.print("[green]Import plan aborted; music was not changed.[/green]")
         else:
@@ -1754,11 +1758,15 @@ def _show_import_plan(console: Any, plan: Any) -> None:
             ("Status", plan.state),
             ("Profile", plan.profile),
             ("Validated audio files", human_number(len(plan.files))),
+            ("Preserved artifacts", human_number(len(plan.artifacts))),
+            ("Automatic fixups", human_number(len(plan.fixups))),
             ("Duration", human_duration(plan.duration_seconds)),
             ("Logical size", human_bytes(plan.logical_bytes)),
         ],
         right_aligned=frozenset({"VALUE"}),
     )
+    for fixup in plan.fixups:
+        console.print(f"[cyan]Fixed:[/cyan] {fixup}")
     for warning in plan.warnings:
         console.print(f"[yellow]Warning:[/yellow] {warning}")
 

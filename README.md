@@ -134,16 +134,18 @@ muse mv old-path new-path             # move content and preserve cached hashes
 
 #### Import
 
-The initial `import` implementation accepts nonempty, audio-only directories and individual audio files beneath `backlog/`. It:
+The `import` implementation accepts nonempty release directories and individual audio files beneath `backlog/`. It:
 
 - uses ffprobe and ffmpeg to recognize and fully decode MP3, M4A (AAC or Apple Lossless), Ogg Vorbis/Opus, common PCM WAV, and FLAC;
-- checks essential tags and release numbering;
+- fills deterministic missing metadata: album artist from artist, track number from a numeric filename prefix, and disc number as `1/1`;
+- checks essential tags and release numbering after those fixups;
 - preserves the original album position of an individually imported selection;
 - identifies genuine one-track releases as standalone singles;
+- preserves conventional `cover.jpg`, `folder.png`, and similar front-cover files and embeds one unambiguous nearby cover when an audio file has no embedded artwork;
 - reports mixed codecs, sample rates, or bit depths but preserves them as-is; and
 - runs the native FLAC integrity check when available.
 
-Import does not edit tags, embed artwork, or classify artifacts. A destination is required to create a plan, and only `--apply` moves the planned file or directory into `master/`. A file may target an existing shared directory (its filename is appended) or an exact new filename with the same extension. Individually imported album selections retain positions such as `4/10` without requiring the other tracks; directory imports still require coherent, contiguous release numbering. This supports directory-wrapped singles, album selections, and independently imported singles grouped in a human-friendly directory.
+Planning may perform the listed lossless tag and artwork fixups in `backlog/`; the preview reports each change. Only `--apply` moves the planned content into `master/`. A destination is required to create a plan. For a file source, a destination without the source's audio extension is treated as a directory and the filename is appended. Missing destination directories are created during apply; an exact new filename with the same extension remains supported. Individually imported album selections retain positions such as `4/10` without requiring the other tracks; directory imports still require coherent, contiguous release numbering. This supports directory-wrapped singles, album selections, and independently imported singles grouped in a human-friendly directory. Other non-audio artifacts remain blockers.
 
 #### Compaction
 
