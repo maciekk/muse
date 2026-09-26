@@ -4,18 +4,29 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-from dataclasses import asdict, dataclass
+import sqlite3
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from mutagen import MutagenError
 
+from muse import cache
 from muse.filesystem import WalkError, walk
 from muse.hashing import sha256_file
 from muse.media import MediaInfo, MediaInspectionError, inspect_media
 from muse.media_fixup import embed_cover, is_obvious_cover, repair_tags
+from muse.mutation import (
+    archive_record,
+    atomic_json,
+    checked_path,
+    endpoint_state,
+    mutation_lock,
+    occupied,
+    rename_exact,
+    sync_directory,
+)
 from muse.repository import AUDIO_EXTENSIONS
 
 SCHEMA_VERSION = 3
@@ -321,17 +332,18 @@ def _destination(root: Path, source: Path, value: str | Path) -> Path:
     master = (root / "master").absolute()
     if not destination.is_relative_to(master):
         raise ValueError("destination must be beneath master/")
-    if destination.exists():
+    if occupied(destination):
         if not destination.is_dir() or destination.is_symlink():
             raise ValueError("destination already exists and is not a directory")
         destination /= source.name
     elif source.is_file() and destination.suffix.lower() != source.suffix.lower():
         # A non-audio destination for a file is naturally a collection directory.
         destination /= source.name
-    if destination.exists():
+    if occupied(destination):
         raise ValueError("final destination already exists")
     if source.is_file() and destination.suffix.lower() != source.suffix.lower():
         raise ValueError("a file destination must preserve the source extension")
+    checked_path(root, destination.relative_to(root))
     existing_parent = destination.parent
     while not existing_parent.exists() and existing_parent != root:
         existing_parent = existing_parent.parent
@@ -342,14 +354,7 @@ def _destination(root: Path, source: Path, value: str | Path) -> Path:
 
 
 def _write(path: Path, plan: ImportPlan) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    with temporary.open("w") as stream:
-        json.dump(plan.to_dict(), stream, indent=2, sort_keys=True)
-        stream.write("\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    temporary.replace(path)
+    atomic_json(path, plan.to_dict())
 
 
 def _path_component(value: str, label: str) -> str:
@@ -389,10 +394,27 @@ def make_plan(
     *,
     accept_inconsistent_album_artists: bool = False,
 ) -> ImportPlan:
+    with mutation_lock(root):
+        return _make_plan(
+            root,
+            source,
+            destination,
+            accept_inconsistent_album_artists=accept_inconsistent_album_artists,
+        )
+
+
+def _make_plan(
+    root: Path,
+    source: Path,
+    destination: str | Path | None = None,
+    *,
+    accept_inconsistent_album_artists: bool = False,
+) -> ImportPlan:
     """Validate a release or single and create or replace its one ready import plan."""
     source_text = _relative_source(root, source)
     destination_path = _destination(root, source, destination) if destination is not None else None
     path = root / ".muse" / "imports" / _plan_key(source_text)
+    checked_path(root, path.relative_to(root))
     current_paths = _current_plan_paths(root)
     if len(current_paths) > 1:
         raise ValueError("multiple import plans exist; apply or abort them before creating another")
@@ -500,17 +522,34 @@ def _verify(
 
 
 def apply_plan(root: Path, source: Path | None = None) -> ImportPlan:
+    with mutation_lock(root):
+        return _apply_plan(root, source)
+
+
+def _reconcile_cache(root: Path, source: Path, destination: Path) -> None:
+    database = root / ".muse" / "muse.db"
+    if not database.exists():
+        return
+    with sqlite3.connect(database) as connection:
+        cache.initialize_database(connection)
+        cache.relocate(connection, source, destination)
+
+
+def _apply_plan(root: Path, source: Path | None = None) -> ImportPlan:
     """Revalidate and atomically rename the ready release or single into master."""
     path = plan_path(root, source)
+    checked_path(root, path.relative_to(root))
     plan = load_plan(root, source)
-    source_path = root / plan.source
-    destination = root / plan.destination
+    source_path = checked_path(root, plan.source, area="backlog")
+    destination = checked_path(root, plan.destination, area="master")
 
-    source_exists = source_path.exists()
-    destination_exists = destination.exists()
-    if source_exists and destination_exists:
+    current = endpoint_state(source_path, destination)
+    source_exists = current in {"pending", "conflicting"}
+    if plan.state not in {"ready", "applying", "completed"}:
+        raise ValueError(f"plan cannot be applied from state {plan.state}")
+    if current == "conflicting":
         raise ValueError("both source and destination exist")
-    if not source_exists and not destination_exists:
+    if current == "missing":
         raise ValueError("neither source nor destination exists")
     if source_exists:
         if plan.state not in {"ready", "applying"}:
@@ -522,14 +561,14 @@ def apply_plan(root: Path, source: Path | None = None) -> ImportPlan:
             plan.profile,
             plan.accepted_inconsistent_album_artists,
         )
-        applying = ImportPlan(**{**plan.__dict__, "state": "applying"})
+        applying = replace(plan, state="applying")
         _write(path, applying)
         _reject_symlink_ancestors(root, destination.parent)
         try:
             destination.parent.mkdir(parents=True, exist_ok=True)
         except OSError as error:
             raise ValueError(f"cannot create destination directories: {error}") from error
-        source_path.rename(destination)
+        rename_exact(source_path, destination)
         plan = applying
     _verify(
         destination,
@@ -539,19 +578,27 @@ def apply_plan(root: Path, source: Path | None = None) -> ImportPlan:
         plan.accepted_inconsistent_album_artists,
     )
 
-    completed = ImportPlan(**{**plan.__dict__, "state": "completed"})
+    _reconcile_cache(root, source_path, destination)
+    completed = replace(plan, state="completed")
     _write(path, completed)
     audit = root / ".muse" / "audit"
-    audit.mkdir(parents=True, exist_ok=True)
+    checked_path(root, audit.relative_to(root))
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    path.replace(audit / f"import-{stamp}-{_plan_key(plan.source)}")
+    archive_record(path, audit, f"import-{stamp}-{_plan_key(plan.source).removesuffix('.json')}")
     return completed
 
 
 def abort_plan(root: Path, source: Path | None = None) -> ImportPlan:
+    with mutation_lock(root):
+        return _abort_plan(root, source)
+
+
+def _abort_plan(root: Path, source: Path | None = None) -> ImportPlan:
     path = plan_path(root, source)
+    checked_path(root, path.relative_to(root))
     plan = load_plan(root, source)
     if plan.state != "ready":
         raise ValueError("only a ready import plan can be aborted")
     path.unlink()
+    sync_directory(path.parent)
     return plan

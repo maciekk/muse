@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import shutil
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from muse import cache
 from muse.filesystem import WalkError, walk
-from muse.hashing import sha256_file
+from muse.mutation import checked_path, mutation_lock, verified_copy_remove
 from muse.repository import AUDIO_EXTENSIONS, scan_path
 
 AUDIO_ADJACENT_EXTENSIONS = frozenset(
@@ -73,27 +74,53 @@ def candidates(root: Path, sources: list[Path], *, thorough: bool = False) -> li
 
 
 def apply(
-    copies: list[SlagCopy], progress: Callable[[int, int], None] | None = None
+    copies: list[SlagCopy],
+    progress: Callable[[int, int], None] | None = None,
+    *,
+    root: Path | None = None,
 ) -> tuple[int, int]:
     """Move candidates after a verified copy, preserving exact existing destinations."""
+    if root is None:
+        if not copies:
+            return 0, 0
+        root = next(
+            (
+                parent.parent
+                for parent in copies[0].source.absolute().parents
+                if parent.name == "backlog"
+                and copies[0].destination.absolute().is_relative_to(parent.parent / "slag")
+            ),
+            None,
+        )
+        if root is None:
+            raise ValueError("slag copies must connect backlog/ and slag/ in one library")
+    with mutation_lock(root):
+        return _apply(copies, progress, root=root)
+
+
+def _apply(
+    copies: list[SlagCopy],
+    progress: Callable[[int, int], None] | None,
+    *,
+    root: Path,
+) -> tuple[int, int]:
     moved = skipped = completed_bytes = 0
+    database = root / ".muse" / "muse.db"
     for item in copies:
-        item.destination.parent.mkdir(parents=True, exist_ok=True)
-        if item.destination.exists():
-            if sha256_file(item.source) != sha256_file(item.destination):
-                raise ValueError(f"destination differs: {item.destination}")
-            item.source.unlink()
-            skipped += 1
-            completed_bytes += item.size
-            if progress:
-                progress(completed_bytes, item.size)
-            continue
-        shutil.copy2(item.source, item.destination)
-        if sha256_file(item.source) != sha256_file(item.destination):
-            item.destination.unlink(missing_ok=True)
-            raise ValueError(f"move verification failed: {item.source}")
-        item.source.unlink()
-        moved += 1
+        checked_path(root, item.source.absolute().relative_to(root.absolute()), area="backlog")
+        checked_path(root, item.destination.absolute().relative_to(root.absolute()), area="slag")
+
+        def reconcile(copy: SlagCopy = item) -> None:
+            if database.exists():
+                with sqlite3.connect(database) as connection:
+                    cache.initialize_database(connection)
+                    cache.relocate(connection, copy.source, copy.destination)
+
+        was_moved = verified_copy_remove(
+            item.source, item.destination, before_source_removal=reconcile
+        )
+        moved += int(was_moved)
+        skipped += int(not was_moved)
         completed_bytes += item.size
         if progress:
             progress(completed_bytes, item.size)

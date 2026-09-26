@@ -152,6 +152,8 @@ The `import` implementation accepts nonempty release directories and individual 
 
 Planning may perform the listed lossless tag and artwork fixups in `backlog/`; the preview reports each change. Muse permits at most one current import plan, so `muse import`, `muse import --apply`, and `muse import --abort` do not require its often-long source path. Only `--apply` moves the planned content into `master/`. When no destination is supplied and no plan exists, Muse suggests and records an `artists/<Album Artist>/...` destination from the tags: complete releases go directly below the artist, standalone singles below `singles/`, and album selections below `selections/`. Supplying a destination overrides that organization. For a file source, a destination without the source's audio extension is treated as a directory and the filename is appended. Missing destination directories are created during apply; an exact new filename with the same extension remains supported. Individually imported album selections retain positions such as `4/10` without requiring the other tracks; directory imports still require coherent, contiguous release numbering. This supports directory-wrapped singles, album selections, and independently imported singles grouped in a human-friendly directory. Other non-audio artifacts remain blockers.
 
+If application stops after the rename, repeat `muse import --apply`. Muse verifies the content at its destination, updates cached paths, and archives the same plan. Planning and application hold a repository mutation lock; a concurrent mutation exits with an error.
+
 #### Compaction
 
 Compaction reverifies every planned duplicate tree before mutation, then moves redundant trees into a dated receipt beneath `trash/`, preserving their repository-relative paths. These same-filesystem renames are cheap and recoverable; permanent trash purging is a separate future operation.
@@ -159,6 +161,8 @@ Compaction reverifies every planned duplicate tree before mutation, then moves r
 Repeat `--prefer PATH` in priority order to favor authoritative subtrees within a duplicate group. Preferences rank copies only within the same managed-area tier, so the built-in `master`, `backlog`, `stopgap`, `incoming`, `slag`, and `trash` policy still takes precedence.
 
 Plans record filenames, file sizes, and high-resolution modification/change timestamps. Applying a current plan therefore does not need to hash content or query the hash cache per file; older pending plans fall back to content-fingerprint verification.
+
+If compaction stops after moving some trees, repeat `muse compact --apply`. The plan records its trash receipt before the first move, so the retry verifies retained content and completed moves and continues into that receipt. Legacy ready plans still apply; a legacy plan with missing source trees and no recorded receipt requires manual inspection.
 
 ### Preserve non-music artifacts
 
@@ -169,6 +173,9 @@ muse slag backlog/pc-2007 --thorough  # include artwork and release-adjacent fil
 ```
 
 `slag/` isolates non-music artifacts moved from backlog for later triage. It retains the original backlog-relative path so provenance remains visible.
+Copies are verified in a temporary file beside their final destination, then published before the backlog source is removed. An interrupted copy leaves the source available for a retry. An existing final destination is accepted only when its content matches the source.
+
+An interrupted `muse mv` can be retried with the same source and destination. Its operation record lets Muse finish companion slag moves and reconcile cached hash paths after a rename.
 
 ## Terminal output
 

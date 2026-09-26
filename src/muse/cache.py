@@ -60,15 +60,24 @@ def insert(connection: sqlite3.Connection, path: Path, identity: FileIdentity, s
 def relocate(connection: sqlite3.Connection, source: Path, destination: Path) -> int:
     """Update an exact path and its descendants without matching sibling prefixes."""
     source_text, destination_text = str(source.absolute()), str(destination.absolute())
-    cursor = connection.execute(
+    if source_text == destination_text or Path(destination_text).is_relative_to(source_text):
+        raise ValueError("cache relocation requires distinct, non-nested paths")
+    condition = """substr(path, 1, length(?)) = ?
+          AND (path = ? OR substr(path, length(?) + 1, 1) = '/')"""
+    parameters = (source_text, source_text, source_text, source_text)
+    count = connection.execute(
+        f"SELECT count(*) FROM file_hashes WHERE {condition}", parameters
+    ).fetchone()[0]
+    connection.execute(
         """
-        UPDATE file_hashes SET path = ? || substr(path, length(?) + 1)
+        UPDATE OR IGNORE file_hashes SET path = ? || substr(path, length(?) + 1)
         WHERE substr(path, 1, length(?)) = ?
           AND (path = ? OR substr(path, length(?) + 1, 1) = '/')
         """,
         (destination_text, source_text, source_text, source_text, source_text, source_text),
     )
-    return cursor.rowcount
+    connection.execute(f"DELETE FROM file_hashes WHERE {condition}", parameters)
+    return int(count)
 
 
 @dataclass(frozen=True)

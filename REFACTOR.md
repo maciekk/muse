@@ -346,4 +346,24 @@ their own exclusions, sorting, and treatment of symlinks and special entries.
 duplicate discovery and tree verification. Incomplete tree inventories now
 report errors and yield no fingerprint for destructive verification. The
 selected symlinked root remains supported. Phase 2 checks: 101 tests passed,
-Ruff lint and CLI help passed. Phase 3 has not started.
+Ruff lint and CLI help passed.
+
+Phase 3 is complete. `mutation.py` owns lexical path checks, occupied-path and
+endpoint classification, repository locking, atomic JSON writes, exact renames,
+verified staged copies, and audit archiving. Import planning holds the mutation
+lock while performing tag/artwork fixups; application resumes its existing
+applying state and reconciles cache paths before source-plan archival. Compaction
+plans now use schema version 2 and record the receipt and moving state before the
+first content rename. A retry verifies retained trees and completed moves, uses
+the same receipt, and repeats cache reconciliation. Legacy ready plans remain
+loadable; interrupted legacy plans without a receipt fail with guidance. `mv`
+records its intended paths and inode identities in a small operation journal so
+companion slag renames and cache updates can be resumed. Slag publishes verified
+same-destination-filesystem copies before removing sources, and reconciles cache
+paths before source removal. Unexpected destinations, symlinked managed paths,
+and concurrent mutations are rejected. README describes retry behavior.
+
+Phase 3 checks: baseline 102 tests and Ruff lint passed; final full suite
+(115 tests), Ruff lint, CLI help, and `git diff --check` passed. Recovery tests inject failures
+at JSON replacement, copy publication, source removal, cache reconciliation,
+second compaction rename, and audit archival. No user vault was used.

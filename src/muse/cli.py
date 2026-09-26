@@ -1689,7 +1689,7 @@ def _slag(args: argparse.Namespace, root: Path) -> int:
         def progress(completed: int, _size: int) -> None:
             display.update(task, completed=completed)
     try:
-        copied, skipped = apply_slag(copies, progress)
+        copied, skipped = apply_slag(copies, progress, root=root)
     except ValueError as error:
         make_console(args.color, stderr=True).print(f"[red]Slag refused:[/red] {error}")
         return 1
