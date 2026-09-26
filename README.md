@@ -136,7 +136,8 @@ muse mv old-path new-path             # move content and preserve cached hashes
 The initial `import` implementation accepts only nonempty, audio-only directories beneath `backlog/`. It:
 
 - uses ffprobe and ffmpeg to recognize and fully decode MP3, M4A (AAC or Apple Lossless), Ogg Vorbis/Opus, common PCM WAV, and FLAC;
-- checks essential tags and album numbering; and
+- checks essential tags and album numbering;
+- reports mixed codecs, sample rates, or bit depths but preserves them as-is; and
 - runs the native FLAC integrity check when available.
 
 Import does not edit tags, embed artwork, or classify artifacts. A destination is required to create a plan, and only `--apply` moves the planned directory into `master/`.

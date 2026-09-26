@@ -13,34 +13,35 @@ def make_track(
     album: str = "Album",
     codec: str = "flac",
     total: int = 2,
+    sample_rate: int | None = None,
 ) -> None:
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-v",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "sine=frequency=440:duration=0.05",
-            "-metadata",
-            f"title=Track {track}",
-            "-metadata",
-            "artist=Artist",
-            "-metadata",
-            f"album={album}",
-            "-metadata",
-            "album_artist=Artist",
-            "-metadata",
-            f"track={track}/{total}",
-            "-metadata",
-            "disc=1/1",
-            "-c:a",
-            codec,
-            str(path),
-        ],
-        check=True,
-    )
+    command = [
+        "ffmpeg",
+        "-y",
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=440:duration=0.05",
+        "-metadata",
+        f"title=Track {track}",
+        "-metadata",
+        "artist=Artist",
+        "-metadata",
+        f"album={album}",
+        "-metadata",
+        "album_artist=Artist",
+        "-metadata",
+        f"track={track}/{total}",
+        "-metadata",
+        "disc=1/1",
+        "-c:a",
+        codec,
+    ]
+    if sample_rate is not None:
+        command.extend(("-ar", str(sample_rate)))
+    subprocess.run([*command, str(path)], check=True)
 
 
 def make_source(root: Path, name: str = "album") -> Path:
@@ -118,6 +119,28 @@ def test_import_rejects_unsafe_sources_and_destinations(tmp_path: Path) -> None:
     make_track(outside / "song.flac", 1)
     with pytest.raises(ValueError, match="backlog"):
         make_plan(root, outside, "games/outside")
+
+
+def test_mixed_audio_parameters_are_preserved_with_a_warning(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = make_source(root)
+    make_track(source / "02.flac", 2, sample_rate=32_000)
+
+    plan = make_plan(root, source, "games/album")
+
+    assert len(plan.warnings) == 1
+    assert "preserved as-is" in plan.warnings[0]
+    assert "32000 Hz" in plan.warnings[0]
+    assert "44100 Hz" in plan.warnings[0]
+    assert plan.to_dict()["warnings"] == list(plan.warnings)
+
+
+def test_missing_plan_has_actionable_error(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = make_source(root)
+
+    with pytest.raises(ValueError, match="provide a destination to create one"):
+        load_plan(root, source)
 
 
 def test_replanning_keeps_one_plan_for_source(tmp_path: Path) -> None:

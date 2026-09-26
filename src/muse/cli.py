@@ -1758,6 +1758,8 @@ def _show_import_plan(console: Any, plan: Any) -> None:
         ],
         right_aligned=frozenset({"VALUE"}),
     )
+    for warning in plan.warnings:
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
 
 
 def _move(args: argparse.Namespace, root: Path) -> int:

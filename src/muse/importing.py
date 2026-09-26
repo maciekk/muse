@@ -53,11 +53,29 @@ class ImportPlan:
     def duration_seconds(self) -> float:
         return sum(item.media.duration_seconds for item in self.files)
 
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        technical: dict[tuple[str, int, int | None], int] = {}
+        for item in self.files:
+            key = (item.media.codec, item.media.sample_rate, item.media.bit_depth)
+            technical[key] = technical.get(key, 0) + 1
+        if len(technical) <= 1:
+            return ()
+        details = ", ".join(
+            f"{codec}/{rate} Hz/{depth or 'unknown'} bit ({count} "
+            f"{'file' if count == 1 else 'files'})"
+            for (codec, rate, depth), count in sorted(
+                technical.items(), key=lambda value: str(value[0])
+            )
+        )
+        return (f"mixed source audio parameters preserved as-is: {details}",)
+
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
         value["files"] = [item.to_dict() for item in self.files]
         value["logical_bytes"] = self.logical_bytes
         value["duration_seconds"] = self.duration_seconds
+        value["warnings"] = list(self.warnings)
         return value
 
 
@@ -132,13 +150,6 @@ def _album_blockers(files: list[ImportFile]) -> list[str]:
     release_ids = {item.media.release_id for item in files if item.media.release_id is not None}
     if len(release_ids) > 1:
         blockers.append(f"inconsistent release identifiers: {', '.join(sorted(release_ids))}")
-    technical = {(item.media.codec, item.media.sample_rate, item.media.bit_depth) for item in files}
-    if len(technical) > 1:
-        details = ", ".join(
-            f"{codec}/{rate} Hz/{depth or 'unknown'} bit"
-            for codec, rate, depth in sorted(technical, key=str)
-        )
-        blockers.append(f"mixed codec or audio parameters require review: {details}")
     return blockers
 
 
@@ -259,6 +270,11 @@ def make_plan(root: Path, source: Path, destination: str | Path) -> ImportPlan:
 
 def load_plan(root: Path, source: Path) -> ImportPlan:
     path = plan_path(root, source)
+    if not path.is_file():
+        relative = _relative_source(root, source)
+        raise ValueError(
+            f"no import plan exists for {relative}; provide a destination to create one"
+        )
     value = json.loads(path.read_text())
     if value.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("unsupported import plan version")
