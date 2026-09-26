@@ -360,6 +360,7 @@ def _doctor(args: argparse.Namespace, root: Path) -> int:
         ]
         print_table(console, ("STATUS", "PATH", "DETAIL"), layout_rows)
 
+        console.print()
         console.print("[bold]Supporting tools[/bold] [dim](optional for read-only commands)[/dim]")
         tool_rows = [
             (
@@ -741,6 +742,7 @@ def _scan(args: argparse.Namespace, root: Path) -> int:
         _print_extension_table(
             console, report.target_extensions, report.target_extension_bytes
         )
+        console.print()
 
     print_table(
         console,
@@ -750,6 +752,7 @@ def _scan(args: argparse.Namespace, root: Path) -> int:
     )
 
     if report.new_files:
+        console.print()
         console.print("[bold]Not-found directories[/bold]")
         directory_rows = _not_found_directory_rows(report)
         print_table(
@@ -982,6 +985,7 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
         )
 
         if args.trees and report.tree_groups:
+            console.print()
             console.print("[bold]Maximal duplicate directory trees[/bold]")
             terminal_output = sys.stdout.isatty()
             path_width = max(24, console.width - 60)
@@ -1008,6 +1012,7 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
             )
 
         if report.groups and not args.trees:
+            console.print()
             console.print("[bold]Duplicate groups[/bold]")
             terminal_output = sys.stdout.isatty()
             path_width = max(24, console.width - 48)
@@ -1135,6 +1140,7 @@ def _diff(args: argparse.Namespace, root: Path) -> int:
             right_aligned=frozenset({"VALUE"}),
         )
         if report.differences:
+            console.print()
             print_table(
                 console,
                 ("KIND", "PATH"),
@@ -1248,6 +1254,7 @@ def _show_compact_plan(
             (human_bytes(item.logical_bytes), *_compact_path_texts(item.remove, item.retain))
             for item in displayed
         ]
+        console.print()
         console.print(f"[bold]{heading}[/bold]")
         print_table(
             console,
@@ -1418,6 +1425,8 @@ def _slag(args: argparse.Namespace, root: Path) -> int:
                     if len(items) > 10:
                         console.print(f"        [dim]… {len(items) - 10} more files[/dim]")
                     console.print()
+            if args.dirs or args.all:
+                console.print()
             print_table(
                 console,
                 ("METRIC", "VALUE"),
@@ -1499,6 +1508,8 @@ def _slag(args: argparse.Namespace, root: Path) -> int:
                 if len(items) > 10:
                     console.print(f"        [dim]… {len(items) - 10} more files[/dim]")
                 console.print()
+        if args.dirs or args.all:
+            console.print()
         print_table(
             console,
             ("METRIC", "VALUE"),

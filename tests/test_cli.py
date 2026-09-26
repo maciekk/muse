@@ -260,6 +260,7 @@ def test_dupes_trees_reports_maximal_directory_copies(tmp_path: Path, capsys) ->
     output = capsys.readouterr().out
     assert result == 0
     assert "Maximal duplicate directory trees" in output
+    assert "\n\nMaximal duplicate directory trees\nTREE" in output
     assert "Duplicate groups" not in output
 
 
@@ -303,6 +304,7 @@ def test_compact_show_lists_every_planned_removal(tmp_path: Path, capsys) -> Non
     assert result == 0
     assert "backlog/copy-01" in output
     assert "backlog/copy-11" in output
+    assert "\n\nPlanned trash moves\nBYTES" in output
     assert "more trash moves in the plan" not in output
     assert (
         output.index("backlog/aaa-01")
@@ -502,6 +504,8 @@ def test_scan_leads_with_target_extensions_and_groups_examples_by_directory(
     output = capsys.readouterr().out
     assert result == 0
     assert output.index("Definite audio file types") < output.index("CATEGORY")
+    assert "\n\nCATEGORY" in output
+    assert "\n\nNot-found directories\nDIRECTORY" in output
     assert ".mp3" in output and ".mp4" not in output
     assert "AUDIO FILES" in output
     assert "Albums/Live" in output
