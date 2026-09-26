@@ -22,7 +22,6 @@ Muse manages one isolated data root:
 ├── stopgap/
 ├── incoming/
 ├── backlog/
-├── duplicates/
 └── .muse/
 ```
 
@@ -48,6 +47,8 @@ muse dupes backlog         # inspect one path beneath the root
 muse dupes --rehash        # bypass the persistent hash cache
 muse dupes --trees backlog  # report maximal exact duplicate directory trees
 muse diff tree-a tree-b      # explain why two trees differ
+muse compact                  # create the sole pending compaction plan
+muse compact apply            # reverify, confirm, then apply that plan
 muse dupes --progress always
 muse dupes --json
 ```

@@ -24,6 +24,7 @@ from rich.progress import (
 from rich_argparse import RichHelpFormatter
 
 from muse import __version__
+from muse.compaction import apply_plan, load_plan, make_plan, save_plan
 from muse.config import MANAGED_AREAS, MASTER_SHELVES, resolve_root, resolve_target
 from muse.duplicates import DuplicateGroup, DuplicateReport, ProgressUpdate, find_duplicates
 from muse.reporting import (
@@ -148,6 +149,10 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     tree_diff.add_argument("right", help="second tree; relative paths are beneath the library root")
     _add_json_argument(tree_diff)
     tree_diff.set_defaults(handler=_diff)
+
+    compact = commands.add_parser("compact", help="plan exact duplicate-tree compaction")
+    compact.add_argument("action", nargs="?", choices=("show", "apply"))
+    compact.set_defaults(handler=_compact)
 
     for name, actions in PLANNED_COMMANDS.items():
         planned = commands.add_parser(name, help=f"planned {name} operations (not implemented)")
@@ -640,6 +645,83 @@ def _diff(args: argparse.Namespace, root: Path) -> int:
                 [(difference.kind, difference.path) for difference in report.differences],
             )
     return 1 if report.errors else 0
+
+
+def _compact_rows(operations: list[Any]) -> list[tuple[str, str]]:
+    return [
+        ("Trees to remove", human_number(len(operations))),
+        ("Files to remove", human_number(sum(operation.files for operation in operations))),
+        (
+            "Logical bytes reclaimed",
+            human_bytes(sum(operation.logical_bytes for operation in operations)),
+        ),
+    ]
+
+
+def _show_compact_plan(console: Any, operations: list[Any]) -> None:
+    print_table(
+        console,
+        ("METRIC", "VALUE"),
+        _compact_rows(operations),
+        right_aligned=frozenset({"VALUE"}),
+    )
+    if operations:
+        rows = [
+            (human_bytes(item.logical_bytes), item.remove, item.retain)
+            for item in operations[:10]
+        ]
+        console.print("[bold]Largest removals[/bold]")
+        print_table(
+            console,
+            ("BYTES", "REMOVE", "RETAIN"),
+            rows,
+            right_aligned=frozenset({"BYTES"}),
+        )
+        if len(operations) > len(rows):
+            remaining = human_number(len(operations) - len(rows))
+            console.print(f"[dim]{remaining} more removals in the plan.[/dim]")
+
+
+def _compact(args: argparse.Namespace, root: Path) -> int:
+    console = make_console(args.color)
+    if args.action == "show":
+        try:
+            operations = load_plan(root)
+        except FileNotFoundError:
+            console.print("[yellow]No pending compact plan.[/yellow]")
+            return 1
+        _show_compact_plan(console, operations)
+        return 0
+    if args.action == "apply":
+        try:
+            operations = load_plan(root)
+        except FileNotFoundError:
+            console.print("[yellow]No pending compact plan.[/yellow]")
+            return 1
+        _show_compact_plan(console, operations)
+        confirmation = input("Type DELETE to apply this plan: ")
+        if confirmation != "DELETE":
+            console.print("[yellow]Compaction cancelled.[/yellow]")
+            return 1
+        try:
+            apply_plan(root, operations)
+        except ValueError as error:
+            console.print(f"[red]Compaction refused:[/red] {error}")
+            return 1
+        console.print("[green]Compaction applied; audit plan saved in .muse/audit/.[/green]")
+        return 0
+
+    console.print("[bold]Exact-tree compaction plan[/bold]")
+    operations, errors = make_plan(root)
+    if errors:
+        console.print("[red]Compaction plan was not saved because scanning had errors.[/red]")
+        return 1
+    save_plan(root, operations)
+    _show_compact_plan(console, operations)
+    console.print(
+        "[dim]No files were changed. Review: muse compact show; apply: muse compact apply[/dim]"
+    )
+    return 0
 
 
 def _not_implemented(args: argparse.Namespace, root: Path) -> int:
