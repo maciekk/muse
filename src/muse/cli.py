@@ -34,6 +34,7 @@ from muse.importing import abort_plan as abort_import_plan
 from muse.importing import apply_plan as apply_import_plan
 from muse.importing import load_plan as load_import_plan
 from muse.importing import make_plan as make_import_plan
+from muse.importing import plan_path as import_plan_path
 from muse.moves import move
 from muse.reporting import (
     emit_json,
@@ -289,11 +290,13 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     import_command = command(
         "import", "strictly validate, plan, or apply a release or single import into master"
     )
-    import_command.add_argument("source", help="file or directory beneath backlog to import")
+    import_command.add_argument(
+        "source", help="file or directory beneath backlog (the backlog/ prefix is optional)"
+    )
     import_command.add_argument(
         "destination",
         nargs="?",
-        help="destination beneath master; required when creating a plan",
+        help="destination beneath master; omitted to suggest one from tags",
     )
     import_actions = import_command.add_mutually_exclusive_group()
     import_actions.add_argument("--apply", action="store_true", help="apply the ready plan")
@@ -1696,12 +1699,18 @@ def _slag(args: argparse.Namespace, root: Path) -> int:
 
 
 def _import(args: argparse.Namespace, root: Path) -> int:
-    source = resolve_target(root, args.source)
+    source_value = Path(args.source).expanduser()
+    if not source_value.is_absolute() and source_value.parts[:1] not in {
+        (area,) for area in (*MANAGED_AREAS, "trash")
+    }:
+        source_value = Path("backlog") / source_value
+    source = resolve_target(root, source_value)
     if (args.apply or args.abort) and args.destination is not None:
         make_console(args.color, stderr=True).print(
             "[red]Import refused:[/red] omit the destination with --apply or --abort"
         )
         return 1
+    destination_suggested = False
     try:
         if args.abort:
             plan = abort_import_plan(root, source)
@@ -1718,20 +1727,28 @@ def _import(args: argparse.Namespace, root: Path) -> int:
         elif args.destination is not None:
             plan = make_import_plan(root, source, args.destination)
             action = "planned"
-        else:
+        elif import_plan_path(root, source).is_file():
             plan = load_import_plan(root, source)
             action = "shown"
+        else:
+            plan = make_import_plan(root, source)
+            action = "planned"
+            destination_suggested = True
     except (FileNotFoundError, ValueError) as error:
         make_console(args.color, stderr=True).print(f"[red]Import refused:[/red] {error}")
         return 1
 
-    payload = {"action": action, **plan.to_dict()}
+    payload = {
+        "action": action,
+        "destination_suggested": destination_suggested,
+        **plan.to_dict(),
+    }
     if args.json:
         emit_json(payload)
     else:
         console = make_console(args.color)
         if action in {"planned", "shown"}:
-            _show_import_plan(console, plan)
+            _show_import_plan(console, plan, destination_suggested=destination_suggested)
             if action == "planned":
                 message = "No files were moved. Apply with muse import SOURCE --apply."
                 if plan.fixups:
@@ -1747,10 +1764,13 @@ def _import(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
-def _show_import_plan(console: Any, plan: Any) -> None:
+def _show_import_plan(
+    console: Any, plan: Any, *, destination_suggested: bool = False
+) -> None:
     console.print("[bold]Strictly validated import plan[/bold]")
     console.print("[dim]Source[/dim]", plan.source)
-    console.print("[dim]Destination[/dim]", plan.destination)
+    label = "Suggested destination" if destination_suggested else "Destination"
+    console.print(f"[dim]{label}[/dim]", plan.destination)
     print_table(
         console,
         ("METRIC", "VALUE"),

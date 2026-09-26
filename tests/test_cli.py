@@ -492,6 +492,13 @@ def test_import_plans_then_applies_audio_only_directory(
         check=True,
     )
 
+    result = main(["--root", str(root), "import", "album", "--json"])
+    suggestion = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert suggestion["action"] == "planned"
+    assert suggestion["destination_suggested"] is True
+    assert suggestion["destination"] == "master/artists/Artist/singles/Album"
+
     result = main(
         ["--root", str(root), "import", "backlog/album", "games/new-album", "--json"]
     )

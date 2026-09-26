@@ -321,10 +321,38 @@ def _write(path: Path, plan: ImportPlan) -> None:
     temporary.replace(path)
 
 
-def make_plan(root: Path, source: Path, destination: str | Path) -> ImportPlan:
+def _path_component(value: str, label: str) -> str:
+    """Keep tag-derived suggestions to one safe, visible path component."""
+    component = "".join(" " if ord(character) < 32 else character for character in value)
+    component = component.replace("/", "／").strip()
+    if component in {"", ".", ".."}:
+        raise ValueError(f"cannot suggest a destination from the {label} tag {value!r}")
+    return component
+
+
+def _suggested_destination(source: Path, files: tuple[ImportFile, ...], profile: str) -> Path:
+    media = files[0].media
+    artist = _path_component(media.album_artist, "album artist")
+    album = _path_component(media.album, "album")
+    if profile == "release":
+        suggestion = Path("artists", artist, album)
+    elif profile == "standalone-single":
+        suggestion = Path("artists", artist, "singles", album)
+    else:
+        suggestion = Path("artists", artist, "selections", album)
+    # Spell out the filename so an album name ending in an audio extension cannot
+    # accidentally turn a collection directory into an exact file destination.
+    return suggestion / source.name if source.is_file() else suggestion
+
+
+def make_plan(
+    root: Path, source: Path, destination: str | Path | None = None
+) -> ImportPlan:
     """Validate a release or single and create or replace its one ready import plan."""
     source_text = _relative_source(root, source)
-    destination_path = _destination(root, source, destination)
+    destination_path = (
+        _destination(root, source, destination) if destination is not None else None
+    )
     path = root / ".muse" / "imports" / _plan_key(source_text)
     if path.exists() and load_plan(root, source).state == "applying":
         raise ValueError("an applying import plan cannot be replaced")
@@ -343,6 +371,9 @@ def make_plan(root: Path, source: Path, destination: str | Path) -> ImportPlan:
         profile = "selection"
     else:
         profile = "release"
+    if destination_path is None:
+        suggestion = _suggested_destination(source, files, profile)
+        destination_path = _destination(root, source, suggestion)
     plan = ImportPlan(
         schema_version=SCHEMA_VERSION,
         source=source_text,

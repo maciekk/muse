@@ -77,6 +77,33 @@ def test_plan_and_apply_audio_only_import(tmp_path: Path) -> None:
     assert list((root / ".muse" / "audit").glob("import-*.json"))
 
 
+def test_plan_suggests_artist_release_destination_from_tags(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = make_source(root)
+
+    plan = make_plan(root, source)
+
+    assert plan.destination == "master/artists/Artist/Album"
+    assert plan.profile == "release"
+
+
+def test_plan_suggests_single_and_selection_destinations_from_tags(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    single = root / "backlog" / "single.flac"
+    selection = root / "backlog" / "selection.flac"
+    single.parent.mkdir(parents=True)
+    make_track(single, 1, album="Single", total=1)
+    make_track(selection, 4, album="Full Album", total=10)
+
+    single_plan = make_plan(root, single)
+    selection_plan = make_plan(root, selection)
+
+    assert single_plan.destination == "master/artists/Artist/singles/Single/single.flac"
+    assert selection_plan.destination == (
+        "master/artists/Artist/selections/Full Album/selection.flac"
+    )
+
+
 def test_plan_and_apply_single_file_into_shared_directory(tmp_path: Path) -> None:
     root = tmp_path / "vault"
     source = root / "backlog" / "mixes" / "song.flac"
