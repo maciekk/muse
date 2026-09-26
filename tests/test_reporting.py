@@ -1,10 +1,16 @@
-from muse.reporting import human_duration, human_number, middle_truncate
+from muse.reporting import human_bytes, human_duration, human_number, middle_truncate
 
 
 def test_human_number_uses_thousands_separators() -> None:
     assert human_number(999) == "999"
     assert human_number(1_000) == "1,000"
     assert human_number(1_234_567) == "1,234,567"
+
+
+def test_human_bytes_uses_compact_unit_labels() -> None:
+    assert human_bytes(1_024) == "1.0 KB"
+    assert human_bytes(1_024**2) == "1.0 MB"
+    assert human_bytes(1_024**3) == "1.0 GB"
 
 
 def test_middle_truncate_preserves_both_ends() -> None:

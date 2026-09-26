@@ -62,7 +62,7 @@ def human_duration(seconds: float) -> str:
 def human_bytes(value: int | None) -> str:
     if value is None:
         return "n/a"
-    units = ("B", "KiB", "MiB", "GiB", "TiB", "PiB")
+    units = ("B", "KB", "MB", "GB", "TB", "PB")
     amount = float(value)
     for unit in units:
         if abs(amount) < 1024 or unit == units[-1]:

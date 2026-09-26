@@ -53,6 +53,7 @@ class PathStats:
     allocated_bytes: int = 0
     allocated_bytes_available: bool = True
     extensions: Counter[str] = field(default_factory=Counter)
+    extension_logical_bytes: Counter[str] = field(default_factory=Counter)
     errors: list[ScanError] = field(default_factory=list)
 
     @property
@@ -70,6 +71,7 @@ class PathStats:
         self.allocated_bytes += other.allocated_bytes
         self.allocated_bytes_available &= other.allocated_bytes_available
         self.extensions.update(other.extensions)
+        self.extension_logical_bytes.update(other.extension_logical_bytes)
         self.errors.extend(other.errors)
 
     def to_dict(self) -> dict[str, Any]:
@@ -84,6 +86,7 @@ class PathStats:
             "logical_bytes": self.logical_bytes,
             "allocated_bytes": (self.allocated_bytes if self.allocated_bytes_available else None),
             "extensions": dict(sorted(self.extensions.items())),
+            "extension_logical_bytes": dict(sorted(self.extension_logical_bytes.items())),
             "errors": [error.to_dict() for error in self.errors],
         }
 
@@ -103,6 +106,7 @@ def _record_file(stats: PathStats, path: Path, stat_result: os.stat_result) -> N
 
     extension = path.suffix.lower() or "[no extension]"
     stats.extensions[extension] += 1
+    stats.extension_logical_bytes[extension] += stat_result.st_size
     if extension in AUDIO_EXTENSIONS:
         stats.audio_files += 1
 

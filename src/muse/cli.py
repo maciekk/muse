@@ -45,7 +45,7 @@ from muse.reporting import (
     print_table,
     status_text,
 )
-from muse.repository import PathStats, scan_path, scan_root_by_area
+from muse.repository import AUDIO_EXTENSIONS, PathStats, scan_path, scan_root_by_area
 from muse.scanning import ScanComparison, compare_with_vault
 from muse.search import search_vault
 from muse.slag import apply as apply_slag
@@ -55,6 +55,35 @@ from muse.slag import stats as slag_stats
 from muse.tree_diff import TreeDiffReport, compare_trees
 
 _NEGATED_SEARCH_TERM = "muse-internal-negated-search-term:"
+_STATS_AREA_ORDER = (
+    "master",
+    "backlog",
+    "stopgap",
+    "incoming",
+    "slag",
+    "trash",
+    ".muse",
+)
+_IMAGE_EXTENSIONS = frozenset(
+    {
+        ".avif",
+        ".bmp",
+        ".gif",
+        ".heic",
+        ".heif",
+        ".jpeg",
+        ".jpg",
+        ".png",
+        ".svg",
+        ".tif",
+        ".tiff",
+        ".webp",
+    }
+)
+_PLAYLIST_EXTENSIONS = frozenset({".cue", ".m3u", ".m3u8", ".pls", ".xspf"})
+_METADATA_EXTENSIONS = frozenset(
+    {".log", ".md5", ".nfo", ".sha1", ".sha256", ".sha512", ".sfv", ".txt"}
+)
 
 
 class MuseHelpFormatter(RichHelpFormatter):
@@ -435,6 +464,22 @@ def _stats_row(name: str, stats: PathStats) -> tuple[str, ...]:
     )
 
 
+def _extension_text(extension: str) -> Text:
+    if extension == "[no extension]":
+        return Text("(no extension)", style="dim")
+    if extension in AUDIO_EXTENSIONS:
+        style = "cyan"
+    elif extension in _IMAGE_EXTENSIONS:
+        style = "magenta"
+    elif extension in _PLAYLIST_EXTENSIONS:
+        style = "green"
+    elif extension in _METADATA_EXTENSIONS:
+        style = "yellow"
+    else:
+        style = ""
+    return Text(extension, style=style)
+
+
 def _stats(args: argparse.Namespace, root: Path) -> int:
     target = resolve_target(root, args.target)
     explicit_target = args.target is not None
@@ -462,7 +507,16 @@ def _stats(args: argparse.Namespace, root: Path) -> int:
         console = make_console(args.color)
         console.print("[bold]Muse statistics[/bold]")
         console.print("[dim]Target[/dim]", str(target), "\n")
-        rows = [_stats_row(name, value) for name, value in sorted(areas.items())]
+        area_priority = {name: index for index, name in enumerate(_STATS_AREA_ORDER)}
+        ordered_areas = sorted(
+            areas.items(),
+            key=lambda item: (
+                item[0] == ".muse",
+                area_priority.get(item[0], len(area_priority)),
+                item[0],
+            ),
+        )
+        rows = [_stats_row(name, value) for name, value in ordered_areas]
         rows.append(_stats_row("TOTAL", total))
         print_table(
             console,
@@ -496,21 +550,48 @@ def _stats(args: argparse.Namespace, root: Path) -> int:
         )
 
         if total.extensions:
-            console.print("[bold]Extensions[/bold]")
-            extension_rows = [
+            console.print()
+            extensions = [
                 (
-                    "(no extension)" if extension == "[no extension]" else extension,
+                    _extension_text(extension),
                     human_number(count),
+                    human_bytes(total.extension_logical_bytes[extension]),
                 )
                 for extension, count in sorted(
                     total.extensions.items(), key=lambda item: (-item[1], item[0])
                 )
             ]
+            column_count = min(3, len(extensions))
+            row_count = (len(extensions) + column_count - 1) // column_count
+            extension_rows = []
+            for row_index in range(row_count):
+                row = []
+                for column_index in range(column_count):
+                    extension_index = row_index + column_index * row_count
+                    extension_pair = (
+                        extensions[extension_index]
+                        if extension_index < len(extensions)
+                        else ("", "", "")
+                    )
+                    extension, count, size = extension_pair
+                    if column_index:
+                        prefixed_extension = Text("│ ")
+                        if isinstance(extension, Text):
+                            prefixed_extension.append_text(extension)
+                        else:
+                            prefixed_extension.append(extension)
+                        extension = prefixed_extension
+                    row.extend((extension, count, size))
+                extension_rows.append(tuple(row))
+            extension_headers = []
+            for column_index in range(column_count):
+                extension_header = "EXTENSION" if column_index == 0 else "│ EXTENSION"
+                extension_headers.extend((extension_header, "#", "SIZE"))
             print_table(
                 console,
-                ("EXTENSION", "FILES"),
+                tuple(extension_headers),
                 extension_rows,
-                right_aligned=frozenset({"FILES"}),
+                right_aligned=frozenset({"#", "SIZE"}),
             )
 
         if total.errors:

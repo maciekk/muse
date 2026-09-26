@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from muse.cli import _compact_path_texts, main
+from muse.cli import _compact_path_texts, _extension_text, main
 from muse.config import MANAGED_AREAS, MASTER_SHELVES
 
 
@@ -110,6 +110,56 @@ def test_stats_labels_files_without_an_extension(tmp_path: Path, capsys) -> None
     output = capsys.readouterr().out
     assert result == 0
     assert "(no extension)" in output
+
+
+def test_stats_orders_areas_by_importance(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    (root / "trash").mkdir()
+
+    assert main(["--root", str(root), "--color", "never", "stats"]) == 0
+
+    output = capsys.readouterr().out
+    expected = ("master", "backlog", "stopgap", "incomi", "slag", "trash", ".muse")
+    assert [output.index(area) for area in expected] == sorted(
+        output.index(area) for area in expected
+    )
+
+
+def test_stats_displays_extensions_down_three_columns(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    extensions = ("flac", "mp3", "jpg", "txt", "cue", "log", "sfv")
+    for rank, extension in enumerate(extensions):
+        for index in range(len(extensions) - rank):
+            (root / "backlog" / f"file-{index}.{extension}").write_bytes(b"x")
+
+    assert main(["--root", str(root), "--color", "never", "stats"]) == 0
+
+    output = capsys.readouterr().out
+    assert output.count("EXTENSION") == 3
+    assert output.count("SIZE") == 3
+    extension_rows = [
+        line
+        for line in output.splitlines()
+        if any(f".{extension}" in line for extension in extensions)
+    ]
+    assert len(extension_rows) == 3
+    assert all(row.count("│") == 2 for row in extension_rows)
+    assert all(extension in extension_rows[0] for extension in (".flac", ".txt", ".sfv"))
+    assert all(extension in extension_rows[1] for extension in (".mp3", ".cue"))
+    assert all(extension in extension_rows[2] for extension in (".jpg", ".log"))
+    assert "7 B" in extension_rows[0]
+    assert "6 B" in extension_rows[1]
+    assert "5 B" in extension_rows[2]
+
+
+def test_stats_color_codes_extension_types() -> None:
+    assert _extension_text(".flac").style == "cyan"
+    assert _extension_text(".jpg").style == "magenta"
+    assert _extension_text(".m3u").style == "green"
+    assert _extension_text(".log").style == "yellow"
+    assert _extension_text(".bin").style == ""
 
 
 def test_search_reports_matches_across_content_areas_without_creating_state(
