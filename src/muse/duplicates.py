@@ -9,12 +9,13 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 from time import perf_counter
 from typing import Any
 
+from muse import cache
+from muse.hashing import FileIdentity, sha256_file
 from muse.repository import ScanError
 
 
@@ -38,9 +39,12 @@ ProgressCallback = Callable[[ProgressUpdate], None]
 @dataclass(frozen=True)
 class FileCandidate:
     path: Path
-    size: int
-    mtime_ns: int
+    identity: FileIdentity
     cached_sha256: str | None
+
+    @property
+    def size(self) -> int:
+        return self.identity.size
 
 
 @dataclass(frozen=True)
@@ -176,24 +180,6 @@ class DuplicateReport:
         }
 
 
-def _initialize_database(connection: sqlite3.Connection) -> None:
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS file_hashes (
-            path TEXT PRIMARY KEY,
-            size INTEGER NOT NULL,
-            mtime_ns INTEGER NOT NULL,
-            sha256 TEXT NOT NULL,
-            hashed_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS file_hashes_sha256_idx ON file_hashes (sha256)"
-    )
-    connection.commit()
-
-
 def _iter_files(target: Path, excluded: Path, errors: list[ScanError]) -> Iterator[Path]:
     if target.is_file():
         yield target
@@ -231,15 +217,6 @@ def _display_path(path: Path, target: Path) -> str:
         return str(path)
 
 
-def _sha256(path: Path, on_bytes_read: Callable[[int], None]) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while block := stream.read(4 * 1024 * 1024):
-            digest.update(block)
-            on_bytes_read(len(block))
-    return digest.hexdigest()
-
-
 def _notify(callback: ProgressCallback | None, update: ProgressUpdate) -> None:
     if callback is not None:
         callback(update)
@@ -260,25 +237,14 @@ def _inventory(
 
     for path in _iter_files(target, excluded, report.errors):
         try:
-            stat_result = path.stat(follow_symlinks=False)
-            cache_row = None
-            if not rehash:
-                cache_row = connection.execute(
-                    """
-                    SELECT sha256 FROM file_hashes
-                    WHERE path = ? AND size = ? AND mtime_ns = ?
-                    """,
-                    (str(path.absolute()), stat_result.st_size, stat_result.st_mtime_ns),
-                ).fetchone()
-            cached_sha256 = str(cache_row[0]) if cache_row is not None else None
+            identity = FileIdentity.from_path(path)
+            cached_sha256 = None if rehash else cache.lookup(connection, path, identity)
             if cached_sha256 is not None:
                 discovered_cached_files += 1
-                discovered_cached_bytes += stat_result.st_size
-            candidates.append(
-                FileCandidate(path, stat_result.st_size, stat_result.st_mtime_ns, cached_sha256)
-            )
+                discovered_cached_bytes += identity.size
+            candidates.append(FileCandidate(path, identity, cached_sha256))
             report.files += 1
-            report.logical_bytes += stat_result.st_size
+            report.logical_bytes += identity.size
             _notify(
                 progress,
                 ProgressUpdate(
@@ -329,9 +295,7 @@ def _collect_hashes(
         )
 
     report.hash_worker_threads = (
-        min(max_threads or 16, uncached_files, os.cpu_count() or 1)
-        if uncached_files
-        else 0
+        min(max_threads or 16, uncached_files, os.cpu_count() or 1) if uncached_files else 0
     )
     notify_hashing()
 
@@ -351,8 +315,7 @@ def _collect_hashes(
             uncached.append(candidate)
             continue
         try:
-            before = candidate.path.stat(follow_symlinks=False)
-            if (before.st_size, before.st_mtime_ns) != (candidate.size, candidate.mtime_ns):
+            if FileIdentity.from_path(candidate.path) != candidate.identity:
                 raise OSError("file changed after inventory")
             record(candidate, candidate.cached_sha256)
         except OSError as error:
@@ -364,10 +327,6 @@ def _collect_hashes(
     progress_lock = Lock()
 
     def hash_candidate(candidate: FileCandidate) -> tuple[FileCandidate, str]:
-        before = candidate.path.stat(follow_symlinks=False)
-        if (before.st_size, before.st_mtime_ns) != (candidate.size, candidate.mtime_ns):
-            raise OSError("file changed after inventory")
-
         def record_bytes(count: int) -> None:
             # Reading bytes is not completion: the digest still has to finish,
             # be checked against a final stat, and be stored. Keep accounting
@@ -375,10 +334,9 @@ def _collect_hashes(
             with progress_lock:
                 report.bytes_read += count
 
-        sha256 = _sha256(candidate.path, record_bytes)
-        after = candidate.path.stat(follow_symlinks=False)
-        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-            raise OSError("file changed while being hashed")
+        sha256 = sha256_file(
+            candidate.path, expected=candidate.identity, on_bytes_read=record_bytes
+        )
         return candidate, sha256
 
     if uncached:
@@ -390,8 +348,7 @@ def _collect_hashes(
             max_workers=report.hash_worker_threads, thread_name_prefix="muse-hash"
         ) as executor:
             futures = {
-                executor.submit(hash_candidate, candidate): candidate
-                for candidate in uncached
+                executor.submit(hash_candidate, candidate): candidate for candidate in uncached
             }
             for future in as_completed(futures):
                 candidate = futures[future]
@@ -404,24 +361,7 @@ def _collect_hashes(
                         completed_bytes += candidate.size
                         notify_hashing()
                     continue
-                connection.execute(
-                    """
-                    INSERT INTO file_hashes (path, size, mtime_ns, sha256, hashed_at)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(path) DO UPDATE SET
-                        size = excluded.size,
-                        mtime_ns = excluded.mtime_ns,
-                        sha256 = excluded.sha256,
-                        hashed_at = excluded.hashed_at
-                    """,
-                    (
-                        str(candidate.path.absolute()),
-                        candidate.size,
-                        candidate.mtime_ns,
-                        sha256,
-                        datetime.now(UTC).isoformat(),
-                    ),
-                )
+                cache.insert(connection, candidate.path, candidate.identity, sha256)
                 record(candidate, sha256)
                 report.hashed_files += 1
                 report.hashed_bytes += candidate.size
@@ -453,8 +393,10 @@ def _directory_paths(target: Path, excluded: Path, errors: list[ScanError]) -> l
         for entry in children:
             path = Path(entry.path)
             try:
-                if path != excluded and not entry.is_symlink() and entry.is_dir(
-                    follow_symlinks=False
+                if (
+                    path != excluded
+                    and not entry.is_symlink()
+                    and entry.is_dir(follow_symlinks=False)
                 ):
                     pending.append(path)
             except OSError as error:
@@ -556,9 +498,7 @@ def find_duplicates(
         raise ValueError("max_threads must be at least 1")
     started = perf_counter()
     targets = (
-        [target.absolute()]
-        if isinstance(target, Path)
-        else [path.absolute() for path in target]
+        [target.absolute()] if isinstance(target, Path) else [path.absolute() for path in target]
     )
     database = database.absolute()
     report = DuplicateReport(", ".join(map(str, targets)), str(database))
@@ -587,28 +527,28 @@ def find_duplicates(
 
     database.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(database)
-    _initialize_database(connection)
+    cache.initialize_database(connection)
 
     try:
         phase_started = perf_counter()
         inventory = []
         for scan_target in targets:
             inventory.extend(
-                _inventory(
-                    scan_target, database.parent, connection, report, rehash, progress
-                )
+                _inventory(scan_target, database.parent, connection, report, rehash, progress)
             )
         size_counts = Counter(candidate.size for candidate in inventory)
-        candidates = inventory if trees else [
-            candidate
-            for candidate in inventory
-            if candidate.size > 0 and size_counts[candidate.size] > 1
-        ]
+        candidates = (
+            inventory
+            if trees
+            else [
+                candidate
+                for candidate in inventory
+                if candidate.size > 0 and size_counts[candidate.size] > 1
+            ]
+        )
         report.hash_candidate_files = len(candidates)
         report.hash_candidate_bytes = sum(candidate.size for candidate in candidates)
-        report.cached_files = sum(
-            candidate.cached_sha256 is not None for candidate in candidates
-        )
+        report.cached_files = sum(candidate.cached_sha256 is not None for candidate in candidates)
         report.cached_bytes = sum(
             candidate.size for candidate in candidates if candidate.cached_sha256 is not None
         )

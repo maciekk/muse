@@ -325,3 +325,18 @@ the next session can continue without repeating completed extraction.
 > persisted data compatibility, and keep recovery improvements separate from
 > mechanical extraction. Use small, explicit helpers and report any necessary
 > deviations from the plan. Do not operate on my real music vault.
+
+## Phase status (2026-09-26)
+
+Phase 1 is complete. `hashing.py` owns fresh streaming SHA-256 and file-change
+checks. `cache.py` owns the unchanged SQLite schema, lookup, insertion, pruning,
+and path relocation. Duplicate reports, tree comparisons, scans, import, and slag
+use the shared hash function. Thorough scans cache vault hashes only; external
+sources and import/verified-copy checks are always read freshly. Existing report
+fields remain, with scan cache and physical-read counters added. README documents
+the scan's operational-state writes.
+
+Baseline: 91 tests passed and Ruff lint passed. Phase 1 checks: full test suite,
+Ruff lint, and `muse --help` passed. The changed Python files pass Ruff formatting;
+repository-wide formatting has preexisting failures outside this phase. Phase 2
+has not started.

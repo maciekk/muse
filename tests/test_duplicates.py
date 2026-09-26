@@ -36,8 +36,7 @@ def test_find_duplicates_reports_exact_matches_and_reuses_hashes(tmp_path: Path)
     hashing_updates = [update for update in updates if update.phase == "hashing"]
     assert hashing_updates[-1].completed_files == hashing_updates[-1].total_files
     assert all(
-        update.completed_files < (update.total_files or 0)
-        for update in hashing_updates[:-1]
+        update.completed_files < (update.total_files or 0) for update in hashing_updates[:-1]
     )
     assert len(first.groups) == 1
     assert first.duplicate_occurrences == 2
@@ -109,6 +108,19 @@ def test_changed_file_is_rehashed(tmp_path: Path) -> None:
     assert report.hashed_files == 1
     assert report.cached_files == 1
     assert report.groups == []
+
+
+def test_rehash_bypasses_valid_cache_entries(tmp_path: Path) -> None:
+    for name in ("one.flac", "two.flac"):
+        (tmp_path / name).write_bytes(b"same")
+    database = tmp_path / ".muse" / "muse.db"
+    find_duplicates(tmp_path, database)
+
+    report = find_duplicates(tmp_path, database, rehash=True)
+
+    assert report.hashed_files == 2
+    assert report.cached_files == 0
+    assert report.bytes_read == 8
 
 
 def test_hash_cache_records_file_metadata(tmp_path: Path) -> None:

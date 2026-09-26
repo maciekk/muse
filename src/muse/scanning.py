@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
+import sqlite3
 import tempfile
 from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
+from muse import cache
 from muse.config import CONTENT_AREAS
+from muse.hashing import FileIdentity, sha256_file
 from muse.repository import AUDIO_EXTENSIONS, ScanError
 
 
@@ -22,6 +25,7 @@ class ScannedFile:
     path: Path
     relative: str
     size: int
+    identity: FileIdentity | None = None
 
     @property
     def extension(self) -> str:
@@ -87,6 +91,10 @@ class ScanComparison:
     top_level_bytes: Counter[str] = field(default_factory=Counter)
     hashed_files: int = 0
     hashed_bytes: int = 0
+    cached_files: int = 0
+    cached_bytes: int = 0
+    bytes_read: int = 0
+    hash_worker_threads: int = 0
     errors: list[ScanError] = field(default_factory=list)
 
     @property
@@ -146,6 +154,10 @@ class ScanComparison:
             "hashing": {
                 "files": self.hashed_files,
                 "logical_bytes": self.hashed_bytes,
+                "cached_files": self.cached_files,
+                "cached_bytes": self.cached_bytes,
+                "bytes_read": self.bytes_read,
+                "worker_threads": self.hash_worker_threads,
             },
             "errors": [error.to_dict() for error in self.errors],
         }
@@ -164,10 +176,10 @@ def _inventory(
             errors.append(ScanError(str(target), "target must not be a symlink"))
             return files
         if target.is_file():
-            stat_result = target.stat(follow_symlinks=False)
+            identity = FileIdentity.from_path(target)
             if progress:
-                progress(ScanProgress(1, stat_result.st_size))
-            return [ScannedFile(target, target.name, stat_result.st_size)]
+                progress(ScanProgress(1, identity.size))
+            return [ScannedFile(target, target.name, identity.size, identity)]
         if not target.exists():
             errors.append(ScanError(str(target), "path does not exist"))
             return files
@@ -195,10 +207,9 @@ def _inventory(
                 if entry.is_dir(follow_symlinks=False):
                     pending.append(path)
                 elif entry.is_file(follow_symlinks=False):
+                    identity = FileIdentity.from_path(path)
                     item = ScannedFile(
-                        path,
-                        str(path.relative_to(label_root)),
-                        entry.stat(follow_symlinks=False).st_size,
+                        path, str(path.relative_to(label_root)), identity.size, identity
                     )
                     files.append(item)
                     scanned_bytes += item.size
@@ -330,39 +341,67 @@ def pull_new_directories(
     return PullResult(destination, tuple(sources))
 
 
-def _digest(item: ScannedFile) -> tuple[ScannedFile, str]:
-    before = item.path.stat(follow_symlinks=False)
-    if before.st_size != item.size:
-        raise OSError("file changed after inventory")
-    digest = hashlib.sha256()
-    with item.path.open("rb") as stream:
-        while block := stream.read(4 * 1024 * 1024):
-            digest.update(block)
-    after = item.path.stat(follow_symlinks=False)
-    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-        raise OSError("file changed while being hashed")
-    return item, digest.hexdigest()
-
-
 def _hash_files(
-    files: list[ScannedFile], report: ScanComparison, max_threads: int | None
+    files: list[ScannedFile],
+    report: ScanComparison,
+    max_threads: int | None,
+    connection: sqlite3.Connection,
+    vault_paths: set[Path],
 ) -> dict[Path, str]:
     hashes: dict[Path, str] = {}
-    workers = min(max_threads or 16, len(files), os.cpu_count() or 1)
+    pending = []
+    for item in files:
+        try:
+            if item.identity is None or FileIdentity.from_path(item.path) != item.identity:
+                raise OSError("file changed after inventory")
+            cached = (
+                cache.lookup(connection, item.path, item.identity)
+                if item.path in vault_paths
+                else None
+            )
+            if cached is None:
+                pending.append(item)
+            else:
+                if FileIdentity.from_path(item.path) != item.identity:
+                    raise OSError("file changed after inventory")
+                hashes[item.path] = cached
+                report.cached_files += 1
+                report.cached_bytes += item.size
+        except OSError as error:
+            report.errors.append(ScanError(str(item.path), str(error)))
+    workers = min(max_threads or 16, len(pending), os.cpu_count() or 1)
+    report.hash_worker_threads = workers
     if not workers:
         return hashes
+    progress_lock = Lock()
+
+    def digest(item: ScannedFile) -> str:
+        def count_bytes(count: int) -> None:
+            with progress_lock:
+                report.bytes_read += count
+
+        return sha256_file(item.path, expected=item.identity, on_bytes_read=count_bytes)
+
+    pending_writes = 0
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="muse-scan") as executor:
-        futures = {executor.submit(_digest, item): item for item in files}
+        futures = {executor.submit(digest, item): item for item in pending}
         for future in as_completed(futures):
             item = futures[future]
             try:
-                _, digest = future.result()
+                sha256 = future.result()
             except OSError as error:
                 report.errors.append(ScanError(str(item.path), str(error)))
                 continue
-            hashes[item.path] = digest
+            hashes[item.path] = sha256
             report.hashed_files += 1
             report.hashed_bytes += item.size
+            if item.path in vault_paths and item.identity is not None:
+                cache.insert(connection, item.path, item.identity, sha256)
+                pending_writes += 1
+                if pending_writes >= 100:
+                    connection.commit()
+                    pending_writes = 0
+    connection.commit()
     return hashes
 
 
@@ -444,10 +483,21 @@ def compare_with_vault(
         vault_candidates = [item for item in vault_files if item.size in target_sizes]
         vault_sizes = {item.size for item in vault_candidates}
         target_candidates = [item for item in target_files if item.size in vault_sizes]
-        hashes = _hash_files([*target_candidates, *vault_candidates], report, max_threads)
+        database = root / ".muse" / "muse.db"
+        database.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(database) as connection:
+            cache.initialize_database(connection)
+            hashes = _hash_files(
+                [*target_candidates, *vault_candidates],
+                report,
+                max_threads,
+                connection,
+                {item.path for item in vault_candidates},
+            )
         vault_hashes = {hashes[item.path] for item in vault_candidates if item.path in hashes}
         present = {
-            item.path for item in target_candidates
+            item.path
+            for item in target_candidates
             if item.path in hashes and hashes[item.path] in vault_hashes
         }
     else:
@@ -460,9 +510,7 @@ def compare_with_vault(
 
     report.present_files = sum(item.path in present for item in target_files)
     report.present_bytes = sum(item.size for item in target_files if item.path in present)
-    report.present_audio_files = sum(
-        item.audio for item in target_files if item.path in present
-    )
+    report.present_audio_files = sum(item.audio for item in target_files if item.path in present)
     report.new_files = [item for item in target_files if item.path not in present]
     for item in report.new_files:
         report.extensions[item.extension] += 1

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from muse.duplicates import find_duplicates
 from muse.scanning import PullProgress, ScanProgress, compare_with_vault, pull_new_directories
 
 
@@ -42,6 +43,32 @@ def test_thorough_scan_matches_content_regardless_of_name(tmp_path: Path) -> Non
     assert [item.relative for item in report.new_files] == ["known.mp3"]
     assert report.hashed_files == 5
     assert not report.errors
+
+
+def test_thorough_scan_reuses_vault_cache_but_reads_external_source(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    target = tmp_path / "drive"
+    (root / "master").mkdir(parents=True)
+    target.mkdir()
+    vault_file = root / "master" / "known.bin"
+    external_file = target / "renamed.flac"
+    vault_file.write_bytes(b"same bytes")
+    external_file.write_bytes(b"same bytes")
+    database = root / ".muse" / "muse.db"
+
+    first = compare_with_vault(root, target, thorough=True)
+    second = compare_with_vault(root, target, thorough=True)
+    duplicates = find_duplicates(root / "master", database, trees=True)
+
+    assert first.hashed_files == 2
+    assert first.cached_files == 0
+    assert second.hashed_files == 1
+    assert second.cached_files == 1
+    assert second.bytes_read == len(b"same bytes")
+    assert duplicates.hashed_files == 0
+    assert duplicates.cached_files == 1
+    assert first.to_dict()["hashing"]["files"] == 2
+    assert second.to_dict()["hashing"]["cached_files"] == 1
 
 
 def test_scan_reports_target_inventory_progress_and_extension_totals(

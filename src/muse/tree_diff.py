@@ -7,11 +7,12 @@ import os
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+from muse import cache
+from muse.hashing import FileIdentity, sha256_file
 from muse.repository import ScanError
 
 
@@ -61,26 +62,6 @@ class TreeDiffReport:
         }
 
 
-def _initialize_database(connection: sqlite3.Connection) -> None:
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS file_hashes (
-            path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL,
-            sha256 TEXT NOT NULL, hashed_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.commit()
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while block := stream.read(4 * 1024 * 1024):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def _snapshot(
     root: Path,
     database_parent: Path,
@@ -89,6 +70,7 @@ def _snapshot(
 ) -> tuple[set[str], dict[str, tuple[str, int]]]:
     directories = {"."}
     files: dict[str, tuple[str, int]] = {}
+    pending_writes = 0
     for directory, child_directories, child_files in os.walk(root, followlinks=False):
         current = Path(directory)
         child_directories[:] = [
@@ -101,48 +83,28 @@ def _snapshot(
             try:
                 if path.is_symlink():
                     continue
-                stat_result = path.stat(follow_symlinks=False)
-                row = connection.execute(
-                    """
-                    SELECT sha256 FROM file_hashes WHERE path = ? AND size = ? AND mtime_ns = ?
-                    """,
-                    (str(path.absolute()), stat_result.st_size, stat_result.st_mtime_ns),
-                ).fetchone()
-                if row is None:
-                    sha256 = _sha256(path)
-                    after = path.stat(follow_symlinks=False)
-                    if (stat_result.st_size, stat_result.st_mtime_ns) != (
-                        after.st_size,
-                        after.st_mtime_ns,
-                    ):
-                        raise OSError("file changed while being hashed")
-                    connection.execute(
-                        """
-                        INSERT INTO file_hashes (path, size, mtime_ns, sha256, hashed_at)
-                        VALUES (?, ?, ?, ?, ?)
-                        ON CONFLICT(path) DO UPDATE SET size = excluded.size,
-                            mtime_ns = excluded.mtime_ns, sha256 = excluded.sha256,
-                            hashed_at = excluded.hashed_at
-                        """,
-                        (
-                            str(path.absolute()), stat_result.st_size, stat_result.st_mtime_ns,
-                            sha256, datetime.now(UTC).isoformat(),
-                        ),
-                    )
+                identity = FileIdentity.from_path(path)
+                sha256 = cache.lookup(connection, path, identity)
+                if sha256 is None:
+                    sha256 = sha256_file(path, expected=identity)
+                    cache.insert(connection, path, identity, sha256)
                     report.hashed_files += 1
+                    pending_writes += 1
+                    if pending_writes >= 100:
+                        connection.commit()
+                        pending_writes = 0
                 else:
-                    sha256 = str(row[0])
+                    if FileIdentity.from_path(path) != identity:
+                        raise OSError("file changed after inventory")
                     report.cached_files += 1
-                files[str(path.relative_to(root))] = (sha256, stat_result.st_size)
+                files[str(path.relative_to(root))] = (sha256, identity.size)
             except OSError as error:
                 report.errors.append(ScanError(str(path), str(error)))
     connection.commit()
     return directories, files
 
 
-def _fingerprint(
-    directories: set[str], files: dict[str, tuple[str, int]]
-) -> TreeFingerprint:
+def _fingerprint(directories: set[str], files: dict[str, tuple[str, int]]) -> TreeFingerprint:
     """Produce the same recursive digest used by duplicate-tree planning."""
     children: dict[Path, list[tuple[str, str, str]]] = {
         Path(directory): [] for directory in directories
@@ -243,7 +205,7 @@ def fingerprint_trees(
     fingerprints: dict[Path, TreeFingerprint] = {}
     database.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(database) as connection:
-        _initialize_database(connection)
+        cache.initialize_database(connection)
         for path in dict.fromkeys(item.absolute() for item in paths):
             if not path.is_dir():
                 report.errors.append(ScanError(str(path), "path must be a directory"))
@@ -263,7 +225,7 @@ def compare_trees(left: Path, right: Path, database: Path) -> TreeDiffReport:
         return report
     database.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(database) as connection:
-        _initialize_database(connection)
+        cache.initialize_database(connection)
         left_directories, left_files = _snapshot(left, database.parent, connection, report)
         right_directories, right_files = _snapshot(right, database.parent, connection, report)
     report.left_files, report.right_files = len(left_files), len(right_files)

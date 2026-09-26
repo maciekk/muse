@@ -12,6 +12,7 @@ from typing import Any
 
 from mutagen import MutagenError
 
+from muse.hashing import sha256_file
 from muse.media import MediaInfo, MediaInspectionError, inspect_media
 from muse.media_fixup import embed_cover, is_obvious_cover, repair_tags
 from muse.repository import AUDIO_EXTENSIONS
@@ -141,23 +142,13 @@ def plan_path(root: Path, source: Path | None = None) -> Path:
     return paths[0]
 
 
-def _hash(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while chunk := stream.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _album_blockers(
     files: list[ImportFile], *, accept_inconsistent_album_artists: bool = False
 ) -> list[str]:
     blockers: list[str] = []
     for field, label in (("album", "album"), ("album_artist", "album artist")):
         values = {getattr(item.media, field) for item in files}
-        if len(values) > 1 and not (
-            field == "album_artist" and accept_inconsistent_album_artists
-        ):
+        if len(values) > 1 and not (field == "album_artist" and accept_inconsistent_album_artists):
             blockers.append(f"inconsistent {label} tags: {', '.join(sorted(values))}")
 
     positions: dict[tuple[int, int], list[str]] = {}
@@ -228,7 +219,7 @@ def _inventory(
                         blockers.append(f"empty cover image: {display}")
                     else:
                         artifacts.append(
-                            ImportArtifact(relative, stat.st_size, _hash(path), "cover")
+                            ImportArtifact(relative, stat.st_size, sha256_file(path), "cover")
                         )
                 except OSError as error:
                     blockers.append(f"{display}: {error}")
@@ -244,7 +235,7 @@ def _inventory(
                 blockers.append(f"empty audio file: {display}")
                 continue
             media = inspect_media(path)
-            sha256 = _hash(path)
+            sha256 = sha256_file(path)
             after = path.stat()
             identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
             after_identity = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
@@ -391,15 +382,11 @@ def make_plan(
 ) -> ImportPlan:
     """Validate a release or single and create or replace its one ready import plan."""
     source_text = _relative_source(root, source)
-    destination_path = (
-        _destination(root, source, destination) if destination is not None else None
-    )
+    destination_path = _destination(root, source, destination) if destination is not None else None
     path = root / ".muse" / "imports" / _plan_key(source_text)
     current_paths = _current_plan_paths(root)
     if len(current_paths) > 1:
-        raise ValueError(
-            "multiple import plans exist; apply or abort them before creating another"
-        )
+        raise ValueError("multiple import plans exist; apply or abort them before creating another")
     if current_paths and current_paths[0] != path:
         current = load_plan(root)
         raise ValueError(
@@ -416,9 +403,9 @@ def make_plan(
         validate_release=source.is_dir(),
         accept_inconsistent_album_artists=accept_inconsistent_album_artists,
     )
-    accepted_inconsistent_album_artists = accept_inconsistent_album_artists and len(
-        {item.media.album_artist for item in files}
-    ) > 1
+    accepted_inconsistent_album_artists = (
+        accept_inconsistent_album_artists and len({item.media.album_artist for item in files}) > 1
+    )
     media = files[0].media if len(files) == 1 else None
     standalone = media is not None and (
         media.track_number == 1
@@ -480,9 +467,7 @@ def load_plan(root: Path, source: Path | None = None) -> ImportPlan:
         ),
         artifacts=tuple(ImportArtifact(**item) for item in value.get("artifacts", [])),
         fixups=tuple(value.get("fixups", [])),
-        accepted_inconsistent_album_artists=value.get(
-            "accepted_inconsistent_album_artists", False
-        ),
+        accepted_inconsistent_album_artists=value.get("accepted_inconsistent_album_artists", False),
     )
 
 

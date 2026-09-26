@@ -85,6 +85,7 @@ muse scan /media/old-drive --progress always
 - `scan` compares an external file or directory with `master`, `stopgap`, `incoming`, `backlog`, and `slag`.
 - Relative scan targets are resolved from the current working directory, unlike vault-scoped paths.
 - Quick mode uses a case-insensitive filename and size match as a likely copy. `--thorough` ignores names and locations and verifies SHA-256 checksums.
+- Thorough mode stores vault file hashes in `.muse/muse.db` and reuses size and modification-time matching entries on later scans, duplicate reports, and tree comparisons. It always hashes external source files freshly and never stores their hashes in the vault cache.
 - Only definite audio files are compared and reported. `.mp4` is considered ambiguous because it commonly contains home video; photos and other files are ignored.
 - Results include the target's definite-audio extension mix and coverage. Not-found audio is grouped by directory, with a few of each directory's largest files shown. `--all` expands the terminal table; JSON always contains every path.
 

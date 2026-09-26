@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from muse.hashing import sha256_file
 from muse.repository import AUDIO_EXTENSIONS, scan_path
 
 AUDIO_ADJACENT_EXTENSIONS = frozenset(
@@ -44,14 +44,6 @@ class SlagCopy:
     size: int
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while block := stream.read(4 * 1024 * 1024):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def candidates(root: Path, sources: list[Path], *, thorough: bool = False) -> list[SlagCopy]:
     """List non-audio files beneath backlog sources and their slag destinations."""
     backlog = root / "backlog"
@@ -85,7 +77,7 @@ def apply(
     for item in copies:
         item.destination.parent.mkdir(parents=True, exist_ok=True)
         if item.destination.exists():
-            if _sha256(item.source) != _sha256(item.destination):
+            if sha256_file(item.source) != sha256_file(item.destination):
                 raise ValueError(f"destination differs: {item.destination}")
             item.source.unlink()
             skipped += 1
@@ -94,7 +86,7 @@ def apply(
                 progress(completed_bytes, item.size)
             continue
         shutil.copy2(item.source, item.destination)
-        if _sha256(item.source) != _sha256(item.destination):
+        if sha256_file(item.source) != sha256_file(item.destination):
             item.destination.unlink(missing_ok=True)
             raise ValueError(f"move verification failed: {item.source}")
         item.source.unlink()

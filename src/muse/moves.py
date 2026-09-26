@@ -6,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from muse.duplicates import _initialize_database
+from muse import cache
 
 
 @dataclass(frozen=True)
@@ -74,24 +74,8 @@ def move(root: Path, source: Path, destination: Path) -> MoveResult:
         raise
     try:
         with sqlite3.connect(database) as connection:
-            _initialize_database(connection)
-            cursor = connection.execute(
-                """
-                UPDATE file_hashes
-                SET path = ? || substr(path, length(?) + 1)
-                WHERE substr(path, 1, length(?)) = ?
-                  AND (path = ? OR substr(path, length(?) + 1, 1) = '/')
-                """,
-                (
-                    destination_text,
-                    source_text,
-                    source_text,
-                    source_text,
-                    source_text,
-                    source_text,
-                ),
-            )
-            updated = cursor.rowcount
+            cache.initialize_database(connection)
+            updated = cache.relocate(connection, source, destination)
     except Exception:
         destination.rename(source)
         if slag_source and slag_destination and slag_destination.exists():
