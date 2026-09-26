@@ -13,6 +13,8 @@ This document records product and implementation design that is not necessarily 
 - Optimize physical work, not merely command count. Avoid unnecessary disk reads and copies.
 - Never silently move substantial work into the background. Detached work must be explicit, inspectable, cancellable, and resumable.
 - Keep clean interfaces. Progress belongs on stderr; structured results on stdout must remain usable by scripts.
+- Keep the command vocabulary small. Related operations should share a memorable verb so users can discover precise variants without recalling a large set of similar or specialized verbs.
+- Keep positional arguments unambiguous. For operational commands, every positional argument after the command names a filesystem path or path-like repository identifier; operation variants belong in dashed command names, not subcommands.
 
 ## Repository areas
 
@@ -23,35 +25,52 @@ The intended repository roles are:
 - `incoming/`: newly acquired, not yet classified content.
 - `stopgap/`: temporary noncanonical content.
 - `slag/`: preserved non-music or release-adjacent artifacts deliberately excluded from `master/`; backlog-relative provenance remains visible.
-- `trash/`: recoverable content removed by Muse operations. Trash is not canonical content and must not satisfy reconciliation.
+- `trash/`: recoverable content removed by Muse operations. Trash is not canonical content and must not satisfy imported-content pruning.
 - `.muse/`: operational state, current plans, hash cache, locks, and audit records.
 
 If immutable copies of source archives are required, keep them as a separate concern, preferably outside the managed vault. `backlog/` should answer a simple question when inspected with ordinary filesystem tools: “what remains to be processed?”
+
+## Command grammar and discoverability
+
+Muse uses a flat command grammar:
+
+```text
+muse VERB[-VARIANT] [PATH ...] [--OPTION ...]
+```
+
+For operational commands, positional arguments are exclusively filesystem paths or path-like identifiers within the repository. A word after a command must never be ambiguous between a subcommand and an object on the filesystem. Operation variants therefore use dashed names such as `prune-cache` and `prune-imported`, rather than a nested form such as `prune cache`. Meta-commands such as `help`, whose arguments name commands or command families, are the exception.
+
+The set of leading verbs should remain deliberately small. Commands that share a broad user intent and a meaningful semantic core should form a dashed family. This reduces the vocabulary users must recall even when the complete command set becomes large. It should not, however, force unrelated operations or operations with materially different meanings into one command merely to reduce the verb count; variants retain their own behavior, safety rules, and help.
+
+Family-level help supports discovery without making command execution accept arbitrary prefixes. For example, `muse help prune` should explain the shared meaning of pruning and list commands such as `prune-cache` and `prune-imported`. Only complete command names execute, so adding a new variant cannot make an existing abbreviated invocation ambiguous or change its meaning. Shell completion can provide typing convenience independently.
+
+A bare family name need not be executable. If it is, it must have one clear meaning rather than implicitly combining every variant in the family. In particular, bare `prune` must not silently combine cache maintenance with repository-content mutation.
 
 ## Command responsibilities
 
 Commands should have distinct lifecycle meanings:
 
 - `muse mv`: rename or relocate content without changing its lifecycle.
-- `muse reconcile`: remove from a working area content already secured in `master/`.
+- `muse prune-cache`: remove stale, reproducible cache records.
+- `muse prune-imported`: remove from a working area content already secured in `master/`.
 - `muse slag`: inspect or preserve artifacts excluded from canonical content.
 - `muse import`: plan and perform a validated transition into `master/`.
-- `muse trash`: inspect, restore, or permanently purge recoverable removals.
+- `muse trash`: inspect recoverable removals; dashed variants restore or permanently purge them.
 
 A plain `mv` should not be the normal way to cross from `backlog/` into `master/`. Import validation and journaling would otherwise be easy to bypass accidentally. Moves within an area remain appropriate for correcting organization. Whether exceptional cross-area moves require a force option can be decided when import is implemented.
 
-## Reconciliation
+## Pruning imported content
 
 ### Purpose
 
-Reconciliation makes the filesystem reflect the remaining import workload. It is not merely a duplicate report.
+Imported-content pruning makes the filesystem reflect the remaining import workload. It is not merely a duplicate report.
 
 Conceptual interface:
 
 ```bash
-muse reconcile backlog
-muse reconcile backlog/archive-a
-muse reconcile backlog/archive-a --apply
+muse prune-imported backlog
+muse prune-imported backlog/archive-a
+muse prune-imported backlog/archive-a --apply
 ```
 
 The selected path identifies removal candidates, while `master/` is the reference set. Scope must not accidentally limit the reference scan to the selected backlog subtree.
@@ -62,10 +81,10 @@ The selected path identifies removal candidates, while `master/` is the referenc
 - Another backlog copy is not sufficient justification. Until content is in `master/`, every archive containing it should continue to show it as pending.
 - “Removal” means moving the candidate to `trash/`, not unlinking it.
 - Newly empty directories may be removed.
-- Exact matching is safe for automatic action. Similar recordings, alternate encodings, and files differing in tags or artwork require a decision and are not reconciliation matches.
-- Reconciliation must be idempotent and resumable using the same operation-state rules as import.
+- Exact matching is safe for automatic action. Similar recordings, alternate encodings, and files differing in tags or artwork require a decision and are not imported-content pruning matches.
+- Imported-content pruning must be idempotent and resumable using the same operation-state rules as import.
 
-After importing an album, reconciling all of `backlog/` removes matching copies from every archive and restores the “backlog means work remaining” invariant.
+After importing an album, pruning imported content from all of `backlog/` removes matching copies from every archive and restores the “backlog means work remaining” invariant.
 
 ## Import
 
@@ -138,7 +157,7 @@ Import contains preparation internally rather than exposing a separate `prep` co
 Conceptual phases are:
 
 ```text
-inspect -> reconcile -> classify -> validate -> resolve -> plan -> apply -> verify
+inspect -> prune imported content -> classify -> validate -> resolve -> plan -> apply -> verify
 ```
 
 Planning should cover the following concerns.
@@ -193,7 +212,7 @@ Warn, but never automatically remove, likely alternate representations:
 - alternate bitrates or encodings;
 - similar titles with duplicate track numbers.
 
-Automatic reconciliation remains byte-exact.
+Automatic imported-content pruning remains byte-exact.
 
 #### Filesystem hygiene
 
@@ -221,7 +240,7 @@ A ready plan should summarize, at minimum:
 - accepted audio files to move into master;
 - accepted warnings and explicit classifications;
 - empty directories to clean up;
-- optional post-import backlog reconciliation;
+- optional post-import pruning across the backlog;
 - expected hashes and filesystem preconditions for every content operation.
 
 Planning may write only operational state beneath `.muse/`. `--apply` is required before changing user content.
@@ -283,7 +302,7 @@ Completed operations are skipped. Pending operations run. Partial operations fin
 - Before moving a duplicate out of backlog, reverify the canonical master copy.
 - Empty-directory removal is repeatable and does not require trash.
 - Temporary implementation files may be unlinked; user content must remain represented in master, slag, or trash.
-- Use a repository-level application lock initially. Concurrent planning is acceptable, but concurrent applies are unsafe when post-import reconciliation can touch shared backlog trees.
+- Use a repository-level application lock initially. Concurrent planning is acceptable, but concurrent applies are unsafe when post-import pruning can touch shared backlog trees.
 
 `muse status` should expose interrupted or blocked work and print the source-based command needed to resume it.
 
@@ -310,7 +329,7 @@ Below the receipt, preserve the complete original repository-relative hierarchy,
 The receipt level:
 
 - prevents collisions when the same original path is removed more than once;
-- groups everything displaced by one import or reconciliation;
+- groups everything displaced by one import or imported-content pruning operation;
 - gives users a practical unit to test, restore, or purge;
 - remains an internal plan detail until it becomes a visible trash artifact.
 
@@ -323,14 +342,14 @@ Intended interface:
 ```bash
 muse trash
 muse trash 2025-09-26
-muse trash restore 2025-09-26/143012-import-some-game-soundtrack-a13f
-muse trash purge 2025-09-26/143012-import-some-game-soundtrack-a13f
-muse trash purge 2025-09-26 --apply
-muse trash purge --older-than 7d
-muse trash purge --older-than 30d --apply
+muse trash-restore 2025-09-26/143012-import-some-game-soundtrack-a13f
+muse trash-purge 2025-09-26/143012-import-some-game-soundtrack-a13f
+muse trash-purge 2025-09-26 --apply
+muse trash-purge --older-than 7d
+muse trash-purge --older-than 30d --apply
 ```
 
-Detailed grammar should be reconciled with Muse's current flat command grammar during implementation, but these user tasks must remain straightforward.
+The dashed restore and purge variants preserve the flat grammar: every positional argument is a path-like selection beneath `trash/`.
 
 Behavior:
 
@@ -343,7 +362,7 @@ Behavior:
 - Recent selections should display a conspicuous warning. A mandatory minimum age is not necessary because users may have already tested an import.
 - Restore must refuse collisions and use receipt metadata to reconstruct original locations.
 
-Trash should appear in storage statistics, but normal reconciliation must ignore it as a retained reference. Duplicate reporting may include it only when explicitly requested or when doing so is clearly labeled.
+Trash should appear in storage statistics, but imported-content pruning must ignore it as a retained reference. Duplicate reporting may include it only when explicitly requested or when doing so is clearly labeled.
 
 ## Slag and import
 
@@ -425,9 +444,9 @@ This design should be delivered in small vertical slices rather than one large c
 - Verify checksums, cue sheets, and playlists where possible.
 - Add warnings for likely non-exact duplicates.
 
-### 6. Post-import reconciliation and trash lifecycle
+### 6. Post-import pruning and trash lifecycle
 
-- Include previewed global backlog reconciliation in import.
+- Include previewed global imported-content pruning in import.
 - Add restore and explicit purge.
 - Add age-based purge selection and recent-item warnings.
 - Surface interrupted work in `muse status` and `muse doctor` where appropriate.

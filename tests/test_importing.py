@@ -1,0 +1,92 @@
+from pathlib import Path
+
+import pytest
+
+from muse.importing import apply_plan, load_plan, make_plan, plan_path
+
+
+def make_source(root: Path, name: str = "album") -> Path:
+    source = root / "backlog" / name
+    source.mkdir(parents=True)
+    (source / "01.flac").write_bytes(b"audio one")
+    (source / "02.flac").write_bytes(b"audio two")
+    (root / "master" / "games").mkdir(parents=True)
+    return source
+
+
+def test_plan_and_apply_audio_only_import(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = make_source(root)
+
+    plan = make_plan(root, source, "games/")
+
+    assert plan.source == "backlog/album"
+    assert plan.destination == "master/games/album"
+    assert plan.state == "ready"
+    assert len(plan.files) == 2
+    assert source.is_dir()
+
+    completed = apply_plan(root, source)
+
+    assert completed.state == "completed"
+    assert not source.exists()
+    assert (root / "master" / "games" / "album" / "01.flac").read_bytes() == b"audio one"
+    assert not plan_path(root, source).exists()
+    assert list((root / ".muse" / "audit").glob("import-*.json"))
+
+
+def test_apply_resumes_after_directory_was_renamed(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = make_source(root)
+    plan = make_plan(root, source, "master/games/new-name")
+    destination = root / plan.destination
+    source.rename(destination)
+
+    completed = apply_plan(root, source)
+
+    assert completed.state == "completed"
+    assert destination.is_dir()
+
+
+def test_import_refuses_changed_or_non_audio_content(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = make_source(root)
+    make_plan(root, source, "games/album")
+    (source / "01.flac").write_bytes(b"changed")
+
+    with pytest.raises(ValueError, match="changed"):
+        apply_plan(root, source)
+
+    other = root / "backlog" / "with-art"
+    other.mkdir()
+    (other / "song.flac").write_bytes(b"audio")
+    (other / "cover.jpg").write_bytes(b"image")
+    with pytest.raises(ValueError, match="non-audio"):
+        make_plan(root, other, "games/with-art")
+
+
+def test_import_rejects_unsafe_sources_and_destinations(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = make_source(root)
+
+    for destination in ("../outside", "backlog/other"):
+        with pytest.raises(ValueError, match="destination"):
+            make_plan(root, source, destination)
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "song.flac").write_bytes(b"audio")
+    with pytest.raises(ValueError, match="backlog"):
+        make_plan(root, outside, "games/outside")
+
+
+def test_replanning_keeps_one_plan_for_source(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = make_source(root)
+    make_plan(root, source, "games/first")
+
+    updated = make_plan(root, source, "games/second")
+
+    assert updated.destination == "master/games/second"
+    assert load_plan(root, source) == updated
+    assert len(list((root / ".muse" / "imports").glob("*.json"))) == 1

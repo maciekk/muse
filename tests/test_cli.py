@@ -191,6 +191,33 @@ def test_mv_renames_content_and_reports_cached_hashes(tmp_path: Path, capsys) ->
     assert (root / "backlog" / "new").is_dir()
 
 
+def test_import_plans_then_applies_audio_only_directory(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    source = root / "backlog" / "album"
+    source.mkdir()
+    (source / "song.flac").write_bytes(b"audio")
+
+    result = main(
+        ["--root", str(root), "import", "backlog/album", "games/new-album", "--json"]
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["action"] == "planned"
+    assert report["destination"] == "master/games/new-album"
+    assert source.exists()
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "IMPORT")
+    result = main(["--root", str(root), "import", "backlog/album", "--apply", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["action"] == "completed"
+    assert not source.exists()
+    assert (root / "master" / "games" / "new-album" / "song.flac").is_file()
+
+
 def test_relative_stats_target_is_beneath_root(tmp_path: Path, capsys) -> None:
     root = tmp_path / "music-vault"
     make_layout(root)

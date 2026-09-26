@@ -54,6 +54,9 @@ muse prune                   # discard hashes for files that no longer exist
 muse diff tree-a tree-b      # explain why two trees differ
 muse compact [backlog]        # create the sole pending compaction plan
 muse compact --apply          # reverify, confirm, then apply that plan
+muse import backlog/album games/album  # plan a minimal audio-only import
+muse import backlog/album --apply      # reverify, confirm, then move it into master
+muse import backlog/album --abort      # discard a ready import plan
 muse mv old-path new-path     # move or rename content; preserve cached hashes
 muse slag                      # inspect preserved non-music artifacts
 muse slag backlog/pc-2007 --apply
@@ -62,7 +65,7 @@ muse dupes --progress always
 muse dupes --json
 ```
 
-Muse uses a flat command grammar: `muse COMMAND [PATH ...] [--OPTION ...]`. Positional arguments after the command are always filesystem scopes; operations use distinct command names or dashed options. `doctor`, `status`, and `stats` do not modify the repository or create Muse state. `dupes` never changes music files, but stores SHA-256 hashes and file size/modification-time metadata in `.muse/muse.db`; unchanged files reuse their cached hashes on later runs. Files with a size that occurs only once cannot be exact duplicates and are not hashed by the default report. `--trees` hashes every file because whole-tree equality requires complete coverage. Use `--rehash` to bypass cached hashes. `prune` immediately removes cache entries whose files no longer exist; it never changes library content, and an accidentally discarded hash can be recomputed.
+Muse uses a flat command grammar: `muse COMMAND [PATH ...] [--OPTION ...]`. Positional arguments after the command are always filesystem scopes; operations use distinct command names or dashed options. The initial `import` implementation deliberately accepts only nonempty, audio-only directories beneath `backlog/`; it does not edit tags, embed artwork, classify artifacts, or validate codecs yet. A destination is required to create its durable plan, and only `--apply` moves the planned directory into `master/`. `doctor`, `status`, and `stats` do not modify the repository or create Muse state. `dupes` never changes music files, but stores SHA-256 hashes and file size/modification-time metadata in `.muse/muse.db`; unchanged files reuse their cached hashes on later runs. Files with a size that occurs only once cannot be exact duplicates and are not hashed by the default report. `--trees` hashes every file because whole-tree equality requires complete coverage. Use `--rehash` to bypass cached hashes. `prune` immediately removes cache entries whose files no longer exist; it never changes library content, and an accidentally discarded hash can be recomputed.
 
 ## Terminal output
 

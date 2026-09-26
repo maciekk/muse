@@ -29,6 +29,10 @@ from muse.cache import CachePruneReport, prune_missing
 from muse.compaction import apply_plan, load_plan, make_plan, save_plan
 from muse.config import MANAGED_AREAS, MASTER_SHELVES, resolve_root, resolve_target
 from muse.duplicates import DuplicateGroup, DuplicateReport, ProgressUpdate, find_duplicates
+from muse.importing import abort_plan as abort_import_plan
+from muse.importing import apply_plan as apply_import_plan
+from muse.importing import load_plan as load_import_plan
+from muse.importing import make_plan as make_import_plan
 from muse.moves import move
 from muse.reporting import (
     emit_json,
@@ -165,6 +169,21 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     compact.set_defaults(handler=_compact)
 
     commands.add_parser("help", help="show help for Muse or one command")
+
+    import_command = commands.add_parser(
+        "import", help="plan or apply an audio-only import into master"
+    )
+    import_command.add_argument("source", help="directory beneath backlog to import")
+    import_command.add_argument(
+        "destination",
+        nargs="?",
+        help="destination beneath master; required when creating a plan",
+    )
+    import_actions = import_command.add_mutually_exclusive_group()
+    import_actions.add_argument("--apply", action="store_true", help="apply the ready plan")
+    import_actions.add_argument("--abort", action="store_true", help="discard the ready plan")
+    _add_json_argument(import_command)
+    import_command.set_defaults(handler=_import)
 
     relocation = commands.add_parser("mv", help="move content and preserve cached hashes")
     relocation.add_argument("source", help="existing path beneath the library root")
@@ -1000,6 +1019,70 @@ def _slag(args: argparse.Namespace, root: Path) -> int:
             f"[green]Moved {copied}; removed {skipped} exact existing source copies.[/green]"
         )
     return 0
+
+
+def _import(args: argparse.Namespace, root: Path) -> int:
+    source = resolve_target(root, args.source)
+    if (args.apply or args.abort) and args.destination is not None:
+        make_console(args.color, stderr=True).print(
+            "[red]Import refused:[/red] omit the destination with --apply or --abort"
+        )
+        return 1
+    try:
+        if args.abort:
+            plan = abort_import_plan(root, source)
+            action = "aborted"
+        elif args.apply:
+            plan = load_import_plan(root, source)
+            if not args.json:
+                _show_import_plan(make_console(args.color), plan)
+            if input("Type IMPORT to apply this plan: ") != "IMPORT":
+                make_console(args.color).print("[yellow]Import cancelled.[/yellow]")
+                return 1
+            plan = apply_import_plan(root, source)
+            action = "completed"
+        elif args.destination is not None:
+            plan = make_import_plan(root, source, args.destination)
+            action = "planned"
+        else:
+            plan = load_import_plan(root, source)
+            action = "shown"
+    except (FileNotFoundError, ValueError) as error:
+        make_console(args.color, stderr=True).print(f"[red]Import refused:[/red] {error}")
+        return 1
+
+    payload = {"action": action, **plan.to_dict()}
+    if args.json:
+        emit_json(payload)
+    else:
+        console = make_console(args.color)
+        if action in {"planned", "shown"}:
+            _show_import_plan(console, plan)
+            if action == "planned":
+                console.print(
+                    "[dim]No music was changed. Apply with muse import SOURCE --apply.[/dim]"
+                )
+        elif action == "aborted":
+            console.print("[green]Import plan aborted; music was not changed.[/green]")
+        else:
+            console.print(f"[green]Imported[/green] {plan.source} → {plan.destination}")
+    return 0
+
+
+def _show_import_plan(console: Any, plan: Any) -> None:
+    console.print("[bold]Audio-only import plan[/bold]")
+    console.print("[dim]Source[/dim]", plan.source)
+    console.print("[dim]Destination[/dim]", plan.destination)
+    print_table(
+        console,
+        ("METRIC", "VALUE"),
+        [
+            ("Status", plan.state),
+            ("Audio files", human_number(len(plan.files))),
+            ("Logical size", human_bytes(plan.logical_bytes)),
+        ],
+        right_aligned=frozenset({"VALUE"}),
+    )
 
 
 def _move(args: argparse.Namespace, root: Path) -> int:
