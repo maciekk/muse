@@ -55,6 +55,7 @@ Commands should have distinct lifecycle meanings:
 - `muse prune-imported`: remove from a working area content already secured in `master/`.
 - `muse slag`: inspect or preserve artifacts excluded from canonical content.
 - `muse import`: plan and perform a validated transition into `master/`.
+- `muse fix`: inspect and transactionally reconcile existing canonical content with current policy.
 - `muse trash`: inspect recoverable removals; dashed variants restore or permanently purge them.
 
 A plain `mv` should not be the normal way to cross from `backlog/` into `master/`. Import validation and journaling would otherwise be easy to bypass accidentally. Moves within an area remain appropriate for correcting organization. Whether exceptional cross-area moves require a force option can be decided when import is implemented.
@@ -372,6 +373,48 @@ Slag remains semantically different from trash:
 - trash records displacement by an operation and is intended for eventual restoration or permanent purge.
 
 Both preserve provenance. Import should reuse slag's verified movement primitives while improving crash behavior where needed. A source plan's artifact decisions should be durable and content-bound, and import should move only the files explicitly shown in its plan.
+
+## Canonical maintenance and `muse fix`
+
+Import validation establishes that content is acceptable at one point in time, but it cannot keep `master/` permanently correct. Older imports may predate a requirement, policy may evolve, and users may deliberately improve tags, artwork, names, or organization later. Canonical maintenance is therefore a distinct lifecycle operation rather than an extension of import or `mv`.
+
+The conceptual comprehensive interface is:
+
+```bash
+muse fix master/games/Some-Album
+muse fix master/games/Some-Album --apply
+muse fix master/games/Some-Album --abort
+```
+
+`fix` inspects the selected canonical content against the current policy, reports compliant facts and deviations, and creates or refreshes a repair plan. It is preview-only unless `--apply` is given. Initial implementation should require an explicit path beneath `master/`; repository-wide audits and batch application can be added only after single-album recovery is trustworthy.
+
+The bare command has one clear meaning: comprehensive reconciliation with current policy. More focused family members may be added as the policies mature, for example:
+
+```bash
+muse fix-tags master/artists/Artist/Album
+muse fix-artwork master/artists/Artist/Album
+muse fix-names master/artists/Artist/Album
+muse fix-layout master/artists/Artist/Album
+```
+
+These are scopes or profiles of the same repair system, not unrelated mutation commands. They should use the same analysis, policy definitions, operation primitives, and current plan for a target. Switching the requested profile while a plan is still a draft refreshes that plan rather than creating competing plans. Once application starts, its scope and decisions are immutable. Family-level `muse help fix` should explain the comprehensive command and list implemented focused variants.
+
+Likely repair concerns include:
+
+- missing, malformed, inconsistent, or obsolete tags;
+- absent, unsuitable, or inconsistently embedded artwork;
+- filenames and directory layout that no longer follow convention;
+- stale release-adjacent files that should be preserved in slag;
+- format or album-coherence findings introduced by newer validation policy;
+- cache, catalogue, and published-library references affected by changed bytes or paths.
+
+Policy-driven changes must be distinguishable from subjective editorial choices. Muse may safely normalize a value only when the desired result is deterministic from configured policy and verified source facts. Ambiguous artist credits, editions, dates, artwork selection, and similar decisions remain explicit questions or blockers. A newer convention must not silently rewrite the entire library merely because it can.
+
+A fix plan should record the policy and schema versions used, observed content identities, proposed replacements and moves, user decisions, warnings, and expected before/after states. Re-running inspection after policy or content changes must mark stale conclusions rather than treating an old audit as proof of current compliance. A successful plan becomes audit history, as with import.
+
+Repairs that change file bytes require stronger handling than ordinary moves. Tag or embedded-artwork rewriting should create a temporary sibling, fully validate and decode the replacement, verify the intended metadata, and only then perform a recoverable replacement. The original file must move to the operation's trash receipt rather than be overwritten or unlinked. Renames and layout changes must reject collisions, account for case-insensitive filesystems, preserve hash-cache knowledge where valid, and update dependent catalogue state transactionally or leave the plan blocked. External artwork and other potentially useful source material must remain represented in `master/`, `slag/`, or `trash/`.
+
+`fix` is not a promise to reconstruct damaged audio without a trustworthy source, nor should routine metadata cleanup implicitly transcode recordings. Integrity failures, uncertain mappings, and lossy transformations block by default and explain what source or decision is required. The operation must preserve the same preview, explicit apply, locking, recovery, idempotence, and no-unrepresented-content guarantees as import.
 
 ## User-visible reporting
 
