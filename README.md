@@ -7,6 +7,8 @@ Muse is a CLI for curating a canonical music archive and publishing selected mus
 - Preserve source material. Destructive operations must be explicit, previewable, conservative, and recoverable.
 - Keep expensive work observable. Slow operations identify their current phase and, when possible, show measurable progress and an ETA.
 - Keep expensive work reusable and resumable. Checksums and other derived facts are persisted rather than discarded, with source metadata used to identify stale results.
+- Make operations idempotent whenever practical. Repeating the same request should continue or verify the intended work rather than duplicate it or force the user to start over.
+- Keep at most one current plan for a given object. Users identify the object, not a plan ID: Muse continues or replaces its latest plan, and completed or discarded work leaves no competing current plan.
 - Report meaningful efficiency statistics. Elapsed time, phase timings, bytes read, throughput, and cache effectiveness are part of the product rather than debugging trivia.
 - Optimize physical work, not merely command count. Avoid unnecessary disk reads and expose both file-based and byte-based measurements.
 - Never silently move substantial work into the background. Future detached jobs will be explicit, inspectable, cancellable, and safe to resume.
@@ -76,10 +78,9 @@ Machine-readable JSON never contains terminal styling. Potentially slow operatio
 
 `slag/` isolates non-music artifacts moved from backlog for later triage. It retains the original backlog-relative path so provenance remains visible.
 
-## Roadmap
+## Design and roadmap
 
-- Add `muse prune` to preview and remove hash-cache entries for files no longer present in the vault, such as after a fully ingested backlog repository is retired.
-- Add `muse scan DIR` to compare music on a prospective external source against the vault, quickly identifying content not already present before deciding whether to add it to `backlog/`.
+See [`DESIGN.md`](DESIGN.md) for proposed behavior, implementation constraints, and incremental plans. It describes future work and is not a list of currently available commands; this README and the CLI help document the implemented interface.
 
 ## Installation
 
