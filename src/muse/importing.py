@@ -154,7 +154,7 @@ def _album_blockers(files: list[ImportFile]) -> list[str]:
     return blockers
 
 
-def _inventory(source: Path) -> tuple[ImportFile, ...]:
+def _inventory(source: Path, *, validate_release: bool = True) -> tuple[ImportFile, ...]:
     if not source.exists():
         raise ValueError("source does not exist")
     if source.is_symlink() or not (source.is_file() or source.is_dir()):
@@ -201,7 +201,7 @@ def _inventory(source: Path) -> tuple[ImportFile, ...]:
             blockers.extend(f"{display}: {detail}" for detail in details)
     if not files and not blockers:
         blockers.append("source contains no audio files")
-    if files:
+    if files and validate_release:
         blockers.extend(_album_blockers(files))
     if blockers:
         raise ImportValidationError(blockers)
@@ -262,7 +262,7 @@ def make_plan(root: Path, source: Path, destination: str | Path) -> ImportPlan:
     path = root / ".muse" / "imports" / _plan_key(source_text)
     if path.exists() and load_plan(root, source).state == "applying":
         raise ValueError("an applying import plan cannot be replaced")
-    files = _inventory(source)
+    files = _inventory(source, validate_release=source.is_dir())
     media = files[0].media if len(files) == 1 else None
     standalone = media is not None and (
         media.track_number == 1
@@ -270,11 +270,17 @@ def make_plan(root: Path, source: Path, destination: str | Path) -> ImportPlan:
         and media.disc_number == 1
         and media.disc_total in {None, 1}
     )
+    if standalone:
+        profile = "standalone-single"
+    elif source.is_file():
+        profile = "selection"
+    else:
+        profile = "release"
     plan = ImportPlan(
         schema_version=SCHEMA_VERSION,
         source=source_text,
         destination=destination_path.relative_to(root).as_posix(),
-        profile="standalone-single" if standalone else "release",
+        profile=profile,
         state="ready",
         created_at=datetime.now(UTC).isoformat(),
         files=files,
@@ -312,9 +318,9 @@ def load_plan(root: Path, source: Path) -> ImportPlan:
     )
 
 
-def _verify(directory: Path, expected: tuple[ImportFile, ...]) -> None:
+def _verify(path: Path, expected: tuple[ImportFile, ...], profile: str) -> None:
     try:
-        actual = _inventory(directory)
+        actual = _inventory(path, validate_release=profile != "selection")
     except ImportValidationError as error:
         raise ValueError(f"content has changed since the import was planned: {error}") from error
     if actual != expected:
@@ -337,14 +343,14 @@ def apply_plan(root: Path, source: Path) -> ImportPlan:
     if source_exists:
         if plan.state not in {"ready", "applying"}:
             raise ValueError(f"plan cannot be applied from state {plan.state}")
-        _verify(source_path, plan.files)
+        _verify(source_path, plan.files, plan.profile)
         if not destination.parent.is_dir():
             raise ValueError("destination parent no longer exists")
         applying = ImportPlan(**{**plan.__dict__, "state": "applying"})
         _write(path, applying)
         source_path.rename(destination)
         plan = applying
-    _verify(destination, plan.files)
+    _verify(destination, plan.files, plan.profile)
 
     completed = ImportPlan(**{**plan.__dict__, "state": "completed"})
     _write(path, completed)

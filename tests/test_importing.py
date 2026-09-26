@@ -100,6 +100,29 @@ def test_plan_and_apply_single_file_into_shared_directory(tmp_path: Path) -> Non
     assert source.parent.is_dir()
 
 
+def test_single_album_track_uses_selection_profile_and_preserves_position(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "vault"
+    source = root / "backlog" / "selections" / "song.flac"
+    source.parent.mkdir(parents=True)
+    make_track(source, 4, total=10)
+    destination = root / "master" / "artists" / "Artist" / "selections"
+    destination.mkdir(parents=True)
+
+    plan = make_plan(root, source, "artists/Artist/selections")
+
+    assert plan.profile == "selection"
+    assert plan.files[0].media.track_number == 4
+    assert plan.files[0].media.track_total == 10
+
+    completed = apply_plan(root, source)
+
+    assert completed.state == "completed"
+    assert not source.exists()
+    assert (destination / "song.flac").is_file()
+
+
 def test_single_file_can_be_renamed_at_an_exact_destination(tmp_path: Path) -> None:
     root = tmp_path / "vault"
     source = root / "backlog" / "song.flac"

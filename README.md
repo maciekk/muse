@@ -120,7 +120,7 @@ Duplicate reporting rules:
 
 ```bash
 muse import backlog/album games/album         # plan a release-directory import
-muse import backlog/mixes/song.flac games/mixes/ # plan a single into a shared directory
+muse import backlog/mixes/song.flac games/mixes/ # plan a single or selection into a shared directory
 muse import backlog/album --apply             # reverify and move it into master
 muse import backlog/album --abort             # discard a ready import plan
 
@@ -138,11 +138,12 @@ The initial `import` implementation accepts nonempty, audio-only directories and
 
 - uses ffprobe and ffmpeg to recognize and fully decode MP3, M4A (AAC or Apple Lossless), Ogg Vorbis/Opus, common PCM WAV, and FLAC;
 - checks essential tags and release numbering;
+- preserves the original album position of an individually imported selection;
 - identifies genuine one-track releases as standalone singles;
 - reports mixed codecs, sample rates, or bit depths but preserves them as-is; and
 - runs the native FLAC integrity check when available.
 
-Import does not edit tags, embed artwork, or classify artifacts. A destination is required to create a plan, and only `--apply` moves the planned file or directory into `master/`. A file may target an existing shared directory (its filename is appended) or an exact new filename with the same extension. This supports both directory-wrapped singles and independently imported singles grouped in a human-friendly directory.
+Import does not edit tags, embed artwork, or classify artifacts. A destination is required to create a plan, and only `--apply` moves the planned file or directory into `master/`. A file may target an existing shared directory (its filename is appended) or an exact new filename with the same extension. Individually imported album selections retain positions such as `4/10` without requiring the other tracks; directory imports still require coherent, contiguous release numbering. This supports directory-wrapped singles, album selections, and independently imported singles grouped in a human-friendly directory.
 
 #### Compaction
 
