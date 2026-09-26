@@ -30,6 +30,43 @@ The intended repository roles are:
 
 If immutable copies of source archives are required, keep them as a separate concern, preferably outside the managed vault. `backlog/` should answer a simple question when inspected with ordinary filesystem tools: “what remains to be processed?”
 
+## Canonical releases and individual tracks
+
+Canonical content is music deliberately retained by the user; it is not limited to complete albums. Muse must support both release-shaped content and independently curated tracks without inventing release metadata or making an incomplete album look complete.
+
+The recommended organization distinguishes the reason a track stands alone:
+
+```text
+master/
+├── artists/
+│   └── Artist/
+│       ├── Album/                         # complete release
+│       ├── singles/Single Title/          # actual standalone release
+│       └── selections/Album/
+│           └── 07 - Selected Track.flac   # retained from an incomplete album
+└── games/
+    └── Game or Series/
+        ├── Soundtrack Album/
+        └── remixes/
+            └── Remixer - Remix Title/
+                └── Remix Title.flac
+```
+
+An official one-track single remains a release and belongs under the credited artist. A track selected from a larger album should retain its true album identity and original track position, but its `selections/` path must make clear that the vault does not contain the complete release. A remix strongly associated with one game belongs under `games/<Game or Series>/remixes/`; a multi-game mashup may use `games/crossovers/`. When the remixer is the track's stronger primary identity, it belongs under `artists/<Remixer>/remixes/` instead. `misc/` is a fallback only when no useful primary identity exists.
+
+Paths provide one stable browsing axis, not every possible classification. Artist, source work, game, remixer, and release relationships should remain in metadata where the format and catalogue support them rather than being duplicated into increasingly elaborate directory trees.
+
+Even one audio file should normally occupy its own directory as the canonical import unit. This leaves a stable place for artwork, source notes, cue sheets, alternate versions, and later repairs. It does not turn that directory into an album.
+
+Release import and individual-track import require distinct validation profiles:
+
+- A release profile requires coherent album identity and contiguous disc and track numbering for the imported release.
+- A selection profile validates tracks independently. It requires at least title and artist, preserves real album metadata when known, and accepts an original position such as track `7/12` without requiring tracks 1–6 to be present.
+- A standalone-single profile may use release validation when it is genuinely tagged as a one-track release, normally track `1/1`.
+- Reports and durable plans must identify the selected profile and whether content represents a complete release, a standalone single, or a selection.
+
+The initial importer remains deliberately release-shaped: it requires album and album-artist tags and contiguous numbering beginning at one. Consequently, a genuine `1/1` single can be imported today, while an untouched `7/12` album selection is expected to block. Future selection support must add the separate profile rather than weakening release-coherence checks or asking users to falsify tags.
+
 ## Command grammar and discoverability
 
 Muse uses a flat command grammar:
