@@ -45,11 +45,14 @@ from muse.reporting import (
     status_text,
 )
 from muse.repository import PathStats, scan_path, scan_root_by_area
+from muse.search import search_vault
 from muse.slag import apply as apply_slag
 from muse.slag import candidates as slag_candidates
 from muse.slag import inventory as slag_inventory
 from muse.slag import stats as slag_stats
 from muse.tree_diff import TreeDiffReport, compare_trees
+
+_NEGATED_SEARCH_TERM = "muse-internal-negated-search-term:"
 
 
 class MuseHelpFormatter(RichHelpFormatter):
@@ -118,6 +121,18 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     )
     _add_json_argument(stats)
     stats.set_defaults(handler=_stats)
+
+    search = commands.add_parser(
+        "search", help="find files or directories by name across the vault"
+    )
+    search.add_argument(
+        "terms",
+        nargs="+",
+        metavar="QUERY",
+        help="case-insensitive terms; prefix with - to exclude matching paths",
+    )
+    _add_json_argument(search)
+    search.set_defaults(handler=_search)
 
     dupes = commands.add_parser(
         "dupes",
@@ -316,6 +331,52 @@ def _status(args: argparse.Namespace, root: Path) -> int:
         console.print("[dim]Read-only inspection; no Muse state was created or changed.[/dim]")
 
     return 1 if failed else 0
+
+
+def _search_path_text(path: str) -> Text:
+    """De-emphasize a result's parent path while keeping its basename prominent."""
+    parent, separator, name = path.rpartition("/")
+    rendered = Text()
+    if separator:
+        rendered.append(f"{parent}/", style="dim")
+    rendered.append(name, style="not dim bold")
+    return rendered
+
+
+def _search(args: argparse.Namespace, root: Path) -> int:
+    matches, errors = search_vault(root, args.terms)
+    result = {
+        "root": str(root),
+        "query": args.terms,
+        "match_count": len(matches),
+        "matches": [match.to_dict() for match in matches],
+        "errors": [error.to_dict() for error in errors],
+        "state_created": False,
+    }
+
+    if args.json:
+        emit_json(result)
+    else:
+        console = make_console(args.color)
+        console.print("[bold]Vault search[/bold]")
+        console.print("[dim]Query[/dim]", " ".join(args.terms), "\n")
+        if matches:
+            print_table(
+                console,
+                ("TYPE", "PATH"),
+                [(match.kind, _search_path_text(match.path)) for match in matches],
+            )
+        else:
+            console.print("[yellow]No matches.[/yellow]")
+        console.print(f"[dim]{human_number(len(matches))} matching paths; read-only search.[/dim]")
+
+        if errors:
+            error_console = make_console(args.color, stderr=True)
+            error_console.print("[bold red]Search errors[/bold red]")
+            for error in errors:
+                error_console.print(f"  [red]{error.path}:[/red] {error.message}")
+
+    return 1 if errors else 0
 
 
 def _stats_row(name: str, stats: PathStats) -> tuple[str, ...]:
@@ -1111,6 +1172,32 @@ def _move(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def _protect_negated_search_terms(argv: list[str]) -> list[str]:
+    """Keep search's ``-term`` shorthand from being parsed as an option."""
+    arguments = list(argv)
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument in {"--root", "--color"}:
+            index += 2
+            continue
+        if argument.startswith(("--root=", "--color=")) or argument.startswith("-"):
+            index += 1
+            continue
+        if argument != "search":
+            return arguments
+
+        for term_index in range(index + 1, len(arguments)):
+            term = arguments[term_index]
+            if term == "--":
+                break
+            is_negated = len(term) > 1 and term.startswith("-") and not term.startswith("--")
+            if is_negated and term != "-h":
+                arguments[term_index] = f"{_NEGATED_SEARCH_TERM}{term[1:]}"
+        return arguments
+    return arguments
+
+
 def _help_color(argv: Sequence[str]) -> str:
     """Read the color preference before argparse can handle an early --help."""
     for index, argument in enumerate(argv):
@@ -1125,6 +1212,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments[:1] == ["help"]:
         arguments = [*arguments[1:], "--help"] if len(arguments) > 1 else ["--help"]
+    arguments = _protect_negated_search_terms(arguments)
     parser = build_parser(_help_color(arguments))
     try:
         args = parser.parse_args(arguments)
@@ -1133,5 +1221,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
+    if args.command == "search":
+        args.terms = [
+            f"-{term.removeprefix(_NEGATED_SEARCH_TERM)}"
+            if term.startswith(_NEGATED_SEARCH_TERM)
+            else term
+            for term in args.terms
+        ]
     root = resolve_root(args.root)
     return args.handler(args, root)

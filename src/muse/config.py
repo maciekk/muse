@@ -6,6 +6,7 @@ from pathlib import Path
 
 DEFAULT_ROOT = Path.home() / "music-vault"
 MANAGED_AREAS = ("master", "stopgap", "incoming", "backlog", "slag", ".muse")
+CONTENT_AREAS = tuple(area for area in MANAGED_AREAS if area != ".muse")
 MASTER_SHELVES = ("artists", "games", "movies-tv", "classical", "compilations", "misc")
 
 

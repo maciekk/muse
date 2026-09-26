@@ -111,6 +111,44 @@ def test_stats_labels_files_without_an_extension(tmp_path: Path, capsys) -> None
     assert "(no extension)" in output
 
 
+def test_search_reports_matches_across_content_areas_without_creating_state(
+    tmp_path: Path, capsys
+) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    album = root / "backlog" / "Arcade Remixes"
+    album.mkdir()
+    (album / "Boss Theme.flac").write_bytes(b"audio")
+    (root / "incoming" / "boss rush.mp3").write_bytes(b"audio")
+    before = sorted(root.rglob("*"))
+
+    result = main(["--root", str(root), "search", "BOSS", "-rush", "--json"])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["query"] == ["BOSS", "-rush"]
+    assert report["match_count"] == 1
+    assert report["matches"] == [
+        {"path": "backlog/Arcade Remixes/Boss Theme.flac", "type": "file"},
+    ]
+    assert report["state_created"] is False
+    assert sorted(root.rglob("*")) == before
+
+
+def test_search_dims_parent_path_and_emphasizes_filename(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    album = root / "backlog" / "Album"
+    album.mkdir()
+    (album / "Boss Theme.flac").write_bytes(b"audio")
+
+    result = main(["--root", str(root), "--color", "always", "search", "boss"])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "\x1b[1;2mbacklog/Album/\x1b[0m\x1b[1mBoss Theme.flac\x1b[0m" in output
+
+
 def test_dupes_reports_exact_files_and_persists_hashes(tmp_path: Path, capsys) -> None:
     root = tmp_path / "music-vault"
     make_layout(root)
