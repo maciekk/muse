@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from muse.importing import apply_plan, load_plan, make_plan, plan_path
+from muse.importing import abort_plan, apply_plan, load_plan, make_plan, plan_path
 
 
 def make_track(
@@ -67,7 +67,7 @@ def test_plan_and_apply_audio_only_import(tmp_path: Path) -> None:
     assert len(plan.files) == 2
     assert source.is_dir()
 
-    completed = apply_plan(root, source)
+    completed = apply_plan(root)
 
     assert completed.state == "completed"
     assert not source.exists()
@@ -97,6 +97,7 @@ def test_plan_suggests_single_and_selection_destinations_from_tags(tmp_path: Pat
     make_track(selection, 4, album="Full Album", total=10)
 
     single_plan = make_plan(root, single)
+    abort_plan(root)
     selection_plan = make_plan(root, selection)
 
     assert single_plan.destination == "master/artists/Artist/singles/Single/single.flac"
@@ -222,6 +223,7 @@ def test_import_refuses_changed_or_non_audio_content(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="changed"):
         apply_plan(root, source)
+    abort_plan(root)
 
     other = root / "backlog" / "with-notes"
     other.mkdir()
@@ -352,6 +354,21 @@ def test_missing_plan_has_actionable_error(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="provide a destination to create one"):
         load_plan(root, source)
+
+
+def test_only_one_source_can_have_a_current_import_plan(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    first = make_source(root, "first")
+    second = root / "backlog" / "second"
+    second.mkdir()
+    make_track(second / "01.flac", 1)
+    make_track(second / "02.flac", 2)
+    make_plan(root, first, "games/first")
+
+    with pytest.raises(ValueError, match="already exists for backlog/first"):
+        make_plan(root, second, "games/second")
+
+    assert load_plan(root).source == "backlog/first"
 
 
 def test_replanning_keeps_one_plan_for_source(tmp_path: Path) -> None:

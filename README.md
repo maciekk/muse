@@ -123,8 +123,8 @@ muse import some-song.mp3                     # suggest an artists/ destination 
 muse import backlog/album                     # the explicit backlog/ prefix is also accepted
 muse import backlog/album games/album         # plan a release-directory import at an explicit destination
 muse import backlog/mixes/song.flac games/mixes/ # plan a single or selection into a shared directory
-muse import backlog/album --apply             # reverify and move it into master
-muse import backlog/album --abort             # discard a ready import plan
+muse import --apply                           # reverify and move the sole current plan
+muse import --abort                           # discard the current plan
 
 muse compact [backlog]                # create the sole compaction plan
 muse compact backlog --prefer backlog/archive-a --prefer backlog/archive-b
@@ -148,7 +148,7 @@ The `import` implementation accepts nonempty release directories and individual 
 - reports mixed codecs, sample rates, or bit depths but preserves them as-is; and
 - runs the native FLAC integrity check when available.
 
-Planning may perform the listed lossless tag and artwork fixups in `backlog/`; the preview reports each change. Only `--apply` moves the planned content into `master/`. When no destination is supplied and no plan exists, Muse suggests and records an `artists/<Album Artist>/...` destination from the tags: complete releases go directly below the artist, standalone singles below `singles/`, and album selections below `selections/`. Supplying a destination overrides that organization. For a file source, a destination without the source's audio extension is treated as a directory and the filename is appended. Missing destination directories are created during apply; an exact new filename with the same extension remains supported. Individually imported album selections retain positions such as `4/10` without requiring the other tracks; directory imports still require coherent, contiguous release numbering. This supports directory-wrapped singles, album selections, and independently imported singles grouped in a human-friendly directory. Other non-audio artifacts remain blockers.
+Planning may perform the listed lossless tag and artwork fixups in `backlog/`; the preview reports each change. Muse permits at most one current import plan, so `muse import`, `muse import --apply`, and `muse import --abort` do not require its often-long source path. Only `--apply` moves the planned content into `master/`. When no destination is supplied and no plan exists, Muse suggests and records an `artists/<Album Artist>/...` destination from the tags: complete releases go directly below the artist, standalone singles below `singles/`, and album selections below `selections/`. Supplying a destination overrides that organization. For a file source, a destination without the source's audio extension is treated as a directory and the filename is appended. Missing destination directories are created during apply; an exact new filename with the same extension remains supported. Individually imported album selections retain positions such as `4/10` without requiring the other tracks; directory imports still require coherent, contiguous release numbering. This supports directory-wrapped singles, album selections, and independently imported singles grouped in a human-friendly directory. Other non-audio artifacts remain blockers.
 
 #### Compaction
 

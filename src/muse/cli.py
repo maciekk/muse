@@ -292,7 +292,9 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
         "import", "strictly validate, plan, or apply a release or single import into master"
     )
     import_command.add_argument(
-        "source", help="file or directory beneath backlog (the backlog/ prefix is optional)"
+        "source",
+        nargs="?",
+        help="file or directory beneath backlog (not needed to show, apply, or abort a plan)",
     )
     import_command.add_argument(
         "destination",
@@ -300,8 +302,8 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
         help="destination beneath master; omitted to suggest one from tags",
     )
     import_actions = import_command.add_mutually_exclusive_group()
-    import_actions.add_argument("--apply", action="store_true", help="apply the ready plan")
-    import_actions.add_argument("--abort", action="store_true", help="discard the ready plan")
+    import_actions.add_argument("--apply", action="store_true", help="apply the current plan")
+    import_actions.add_argument("--abort", action="store_true", help="discard the current plan")
     _add_json_argument(import_command)
     import_command.set_defaults(handler=_import)
 
@@ -1736,12 +1738,14 @@ def _make_import_plan_with_confirmation(
 
 
 def _import(args: argparse.Namespace, root: Path) -> int:
-    source_value = Path(args.source).expanduser()
-    if not source_value.is_absolute() and source_value.parts[:1] not in {
-        (area,) for area in (*MANAGED_AREAS, "trash")
-    }:
-        source_value = Path("backlog") / source_value
-    source = resolve_target(root, source_value)
+    source: Path | None = None
+    if args.source is not None:
+        source_value = Path(args.source).expanduser()
+        if not source_value.is_absolute() and source_value.parts[:1] not in {
+            (area,) for area in (*MANAGED_AREAS, "trash")
+        }:
+            source_value = Path("backlog") / source_value
+        source = resolve_target(root, source_value)
     if (args.apply or args.abort) and args.destination is not None:
         make_console(args.color, stderr=True).print(
             "[red]Import refused:[/red] omit the destination with --apply or --abort"
@@ -1761,6 +1765,9 @@ def _import(args: argparse.Namespace, root: Path) -> int:
                 return 1
             plan = apply_import_plan(root, source)
             action = "completed"
+        elif source is None:
+            plan = load_import_plan(root)
+            action = "shown"
         elif args.destination is not None:
             plan = _make_import_plan_with_confirmation(args, root, source)
             action = "planned"
@@ -1787,11 +1794,11 @@ def _import(args: argparse.Namespace, root: Path) -> int:
         if action in {"planned", "shown"}:
             _show_import_plan(console, plan, destination_suggested=destination_suggested)
             if action == "planned":
-                message = "No files were moved. Apply with muse import SOURCE --apply."
+                message = "No files were moved. Apply with muse import --apply."
                 if plan.fixups:
                     message = (
                         "The listed metadata fixups were applied; no files were moved. "
-                        "Apply with muse import SOURCE --apply."
+                        "Apply with muse import --apply."
                     )
                 console.print(f"[dim]{message}[/dim]")
         elif action == "aborted":

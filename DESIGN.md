@@ -131,8 +131,8 @@ After importing an album, pruning imported content from all of `backlog/` remove
 
 ```bash
 muse import SOURCE [DESTINATION]
-muse import SOURCE --apply
-muse import SOURCE --abort
+muse import --apply
+muse import --abort
 ```
 
 The initial implementation should accept sources beneath `backlog/`. Supporting `incoming/` or `stopgap/` later must be an explicit policy decision.
@@ -148,10 +148,7 @@ Both resolve beneath `<root>/master/games/`. Absolute destinations and `..` trav
 
 If the destination names an existing directory, the source directory name is appended, matching normal move behavior. A nonexistent destination denotes the exact final path. This rule must be made conspicuous in previews and covered by tests because destination ambiguity is dangerous.
 
-When no destination is supplied:
-
-- an existing source plan is implied;
-- a new plan may propose a destination from tags and organization policy, but an unresolved destination blocks application.
+When no source or destination is supplied, the sole current import plan is shown. A new plan may propose a destination from tags and organization policy, but an unresolved destination blocks application. Only one current import plan may exist at a time, so apply and abort do not require repeating its source path.
 
 ### Idempotent planning
 
@@ -305,9 +302,9 @@ The exact order may evolve, but no content should be discarded and each committe
 
 ### Plan identity and lookup
 
-The current import plan can be stored beneath an internal key derived from the normalized repository-relative source path, for example under `.muse/imports/`. The storage name is not a user interface.
+The current import plan can be stored beneath an internal key derived from the normalized repository-relative source path, for example under `.muse/imports/`. The storage name is not a user interface, and the directory must contain at most one current plan.
 
-Plan lookup must happen before requiring that `SOURCE` currently exist. During an interrupted application, the source may already be partly emptied or atomically moved into `master/`; `muse import SOURCE --apply` must still locate and resume its plan.
+Plan lookup must not require that `SOURCE` currently exist. During an interrupted application, the source may already be partly emptied or atomically moved into `master/`; `muse import --apply` must still locate and resume the sole plan.
 
 A plan should record:
 

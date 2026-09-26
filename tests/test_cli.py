@@ -509,7 +509,7 @@ def test_import_plans_then_applies_audio_only_directory(
     assert source.exists()
 
     monkeypatch.setattr("builtins.input", lambda _prompt: "IMPORT")
-    result = main(["--root", str(root), "import", "backlog/album", "--apply", "--json"])
+    result = main(["--root", str(root), "import", "--apply", "--json"])
     report = json.loads(capsys.readouterr().out)
     assert result == 0
     assert report["action"] == "completed"

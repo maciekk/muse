@@ -123,8 +123,22 @@ def _plan_key(source: str) -> str:
     return f"{digest}.json"
 
 
-def plan_path(root: Path, source: Path) -> Path:
-    return root / ".muse" / "imports" / _plan_key(_relative_source(root, source))
+def _current_plan_paths(root: Path) -> list[Path]:
+    directory = root / ".muse" / "imports"
+    return sorted(directory.glob("*.json")) if directory.is_dir() else []
+
+
+def plan_path(root: Path, source: Path | None = None) -> Path:
+    if source is not None:
+        return root / ".muse" / "imports" / _plan_key(_relative_source(root, source))
+    paths = _current_plan_paths(root)
+    if not paths:
+        raise ValueError("no current import plan exists")
+    if len(paths) > 1:
+        raise ValueError(
+            "multiple import plans exist; specify a source to resolve the legacy plans"
+        )
+    return paths[0]
 
 
 def _hash(path: Path) -> str:
@@ -381,6 +395,16 @@ def make_plan(
         _destination(root, source, destination) if destination is not None else None
     )
     path = root / ".muse" / "imports" / _plan_key(source_text)
+    current_paths = _current_plan_paths(root)
+    if len(current_paths) > 1:
+        raise ValueError(
+            "multiple import plans exist; apply or abort them before creating another"
+        )
+    if current_paths and current_paths[0] != path:
+        current = load_plan(root)
+        raise ValueError(
+            f"an import plan already exists for {current.source}; apply or abort it first"
+        )
     if path.exists() and load_plan(root, source).state == "applying":
         raise ValueError("an applying import plan cannot be replaced")
     fixups = _prepare(source)
@@ -424,9 +448,10 @@ def make_plan(
     return plan
 
 
-def load_plan(root: Path, source: Path) -> ImportPlan:
+def load_plan(root: Path, source: Path | None = None) -> ImportPlan:
     path = plan_path(root, source)
     if not path.is_file():
+        assert source is not None
         relative = _relative_source(root, source)
         raise ValueError(
             f"no import plan exists for {relative}; provide a destination to create one"
@@ -477,8 +502,8 @@ def _verify(
         raise ValueError("content has changed since the import was planned")
 
 
-def apply_plan(root: Path, source: Path) -> ImportPlan:
-    """Revalidate and atomically rename a ready release or single into master."""
+def apply_plan(root: Path, source: Path | None = None) -> ImportPlan:
+    """Revalidate and atomically rename the ready release or single into master."""
     path = plan_path(root, source)
     plan = load_plan(root, source)
     source_path = root / plan.source
@@ -526,7 +551,7 @@ def apply_plan(root: Path, source: Path) -> ImportPlan:
     return completed
 
 
-def abort_plan(root: Path, source: Path) -> ImportPlan:
+def abort_plan(root: Path, source: Path | None = None) -> ImportPlan:
     path = plan_path(root, source)
     plan = load_plan(root, source)
     if plan.state != "ready":
