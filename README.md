@@ -52,6 +52,9 @@ muse diff tree-a tree-b      # explain why two trees differ
 muse compact [backlog]        # create the sole pending compaction plan
 muse compact --apply          # reverify, confirm, then apply that plan
 muse mv old-path new-path     # move or rename content; preserve cached hashes
+muse slag                      # inspect preserved non-music artifacts
+muse slag --from backlog/pc-2007 --apply
+muse slag --from backlog/pc-2007 --thorough  # include artwork and release-adjacent files
 muse dupes --progress always
 muse dupes --json
 ```
@@ -71,7 +74,11 @@ NO_COLOR=1 muse status
 
 Machine-readable JSON never contains terminal styling. Potentially slow operations delay their progress display to avoid flicker for quick work, but show it immediately when preflight identifies a large workload. Progress is written to stderr and can be controlled with `--progress auto|always|never`.
 
-`slag/` preserves non-music artifacts copied from immutable backlog snapshots for later triage. It retains the source repository and relative path so provenance remains visible.
+`slag/` isolates non-music artifacts moved from backlog for later triage. It retains the original backlog-relative path so provenance remains visible.
+
+## Roadmap
+
+- Add `muse prune` to preview and remove hash-cache entries for files no longer present in the vault, such as after a fully ingested backlog repository is retired.
 
 ## Installation
 

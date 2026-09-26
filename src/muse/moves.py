@@ -52,10 +52,26 @@ def move(root: Path, source: Path, destination: Path) -> MoveResult:
     if source.is_dir() and destination.is_relative_to(source):
         raise ValueError("cannot move a directory into itself")
 
+    slag_source = slag_destination = None
+    backlog = root / "backlog"
+    if source.is_relative_to(backlog):
+        slag_source = root / "slag" / source.relative_to(backlog)
+        slag_destination = root / "slag" / destination.relative_to(backlog)
+        if slag_source.exists() and slag_destination.exists():
+            raise ValueError("corresponding slag destination already exists")
+
     database = root / ".muse" / "muse.db"
     database.parent.mkdir(parents=True, exist_ok=True)
     source_text, destination_text = str(source), str(destination)
-    source.rename(destination)
+    if slag_source and slag_source.exists():
+        slag_destination.parent.mkdir(parents=True, exist_ok=True)
+        slag_source.rename(slag_destination)
+    try:
+        source.rename(destination)
+    except Exception:
+        if slag_source and slag_destination and slag_destination.exists():
+            slag_destination.rename(slag_source)
+        raise
     try:
         with sqlite3.connect(database) as connection:
             _initialize_database(connection)
@@ -78,5 +94,7 @@ def move(root: Path, source: Path, destination: Path) -> MoveResult:
             updated = cursor.rowcount
     except Exception:
         destination.rename(source)
+        if slag_source and slag_destination and slag_destination.exists():
+            slag_destination.rename(slag_source)
         raise
     return MoveResult(source_text, destination_text, updated)

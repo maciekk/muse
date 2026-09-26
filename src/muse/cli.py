@@ -39,6 +39,10 @@ from muse.reporting import (
     status_text,
 )
 from muse.repository import PathStats, scan_path, scan_root_by_area
+from muse.slag import apply as apply_slag
+from muse.slag import candidates as slag_candidates
+from muse.slag import inventory as slag_inventory
+from muse.slag import stats as slag_stats
 from muse.tree_diff import TreeDiffReport, compare_trees
 
 
@@ -160,6 +164,22 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     relocation.add_argument("destination", help="new path beneath the library root")
     _add_json_argument(relocation)
     relocation.set_defaults(handler=_move)
+
+    slag = commands.add_parser("slag", help="inspect or move non-audio backlog artifacts")
+    slag.add_argument("--from", dest="sources", action="append", default=[], metavar="PATH")
+    slag.add_argument("--long", action="store_true", help="include size and file type")
+    slag.add_argument("--all", action="store_true", help="list every selected file")
+    slag.add_argument("--dirs", action="store_true", help="list directories only")
+    slag.add_argument(
+        "--thorough",
+        action="store_true",
+        help="also select audio-adjacent artwork, metadata, and checksum files",
+    )
+    slag.add_argument(
+        "--apply", action="store_true", help="move the selected artifacts after confirmation"
+    )
+    _add_json_argument(slag)
+    slag.set_defaults(handler=_slag)
 
     return parser
 
@@ -731,6 +751,153 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
     console.print(
         "[dim]No files were changed. Review: muse compact show; apply: muse compact apply[/dim]"
     )
+    return 0
+
+
+def _slag(args: argparse.Namespace, root: Path) -> int:
+    if not args.sources:
+        result = slag_stats(root)
+        copies = slag_inventory(root)
+        if args.json:
+            emit_json(result.to_dict())
+        else:
+            console = make_console(args.color)
+            console.print("[bold]Slag inventory[/bold]")
+            rows = [
+                (
+                    str(item.source.relative_to(root / "slag")),
+                    human_bytes(item.size),
+                    item.source.suffix.lower() or "[no extension]",
+                )
+                for item in copies
+            ]
+            print_table(
+                console,
+                ("PATH", "SIZE", "TYPE") if args.long else ("PATH",),
+                rows if args.long else [(row[0],) for row in rows],
+                right_aligned=frozenset({"SIZE"}),
+            )
+            print_table(
+                console,
+                ("METRIC", "VALUE"),
+                [
+                    ("Files", human_number(result.files)),
+                    ("Size", human_bytes(result.logical_bytes)),
+                ],
+                right_aligned=frozenset({"VALUE"}),
+            )
+        return 1 if result.errors else 0
+    try:
+        copies = slag_candidates(
+            root,
+            [resolve_target(root, source) for source in args.sources],
+            thorough=args.thorough,
+        )
+    except ValueError as error:
+        make_console(args.color, stderr=True).print(f"[red]Slag refused:[/red] {error}")
+        return 1
+    if args.json:
+        emit_json(
+            {
+                "files": len(copies),
+                "bytes": sum(item.size for item in copies),
+                "copies": [
+                    {
+                        "source": str(item.source),
+                        "destination": str(item.destination),
+                        "size": item.size,
+                    }
+                    for item in copies
+                ],
+            }
+        )
+    else:
+        console = make_console(args.color)
+        console.print("[bold]Slag extraction[/bold]")
+        grouped: dict[Path, list[Any]] = {}
+        for item in copies:
+            grouped.setdefault(item.destination.parent, []).append(item)
+        if args.dirs:
+            rows = [
+                (
+                    str(directory.relative_to(root / "slag")),
+                    human_number(len(items)),
+                    human_bytes(sum(item.size for item in items)),
+                )
+                for directory, items in grouped.items()
+            ]
+            print_table(
+                console,
+                ("DIRECTORY", "FILES", "SIZE"),
+                rows,
+                right_aligned=frozenset({"FILES", "SIZE"}),
+            )
+        elif args.all:
+            rows = [
+                (str(item.destination.relative_to(root / "slag")), human_bytes(item.size))
+                if args.long
+                else (str(item.destination.relative_to(root / "slag")),)
+                for item in copies
+            ]
+            print_table(
+                console,
+                ("PATH", "SIZE") if args.long else ("PATH",),
+                rows,
+                right_aligned=frozenset({"SIZE"}),
+            )
+        else:
+            for directory, items in grouped.items():
+                relative = directory.relative_to(root / "slag")
+                console.print(
+                    f"[bold]{relative}/[/bold] [dim]{len(items)} files · "
+                    f"{human_bytes(sum(item.size for item in items))}[/dim]"
+                )
+                for item in items[:10]:
+                    detail = f" [dim]{human_bytes(item.size)}[/dim]" if args.long else ""
+                    console.print(f"  {item.destination.name}{detail}")
+                if len(items) > 10:
+                    console.print(f"  [dim]… {len(items) - 10} more files[/dim]")
+        print_table(
+            console,
+            ("METRIC", "VALUE"),
+            [
+                ("Files", human_number(len(copies))),
+                ("Bytes", human_bytes(sum(item.size for item in copies))),
+            ],
+            right_aligned=frozenset({"VALUE"}),
+        )
+    if not args.apply:
+        return 0
+    if input("Type MOVE to move these files into slag: ") != "MOVE":
+        return 1
+    progress = None
+    display = None
+    if sys.stderr.isatty() and copies:
+        display = Progress(
+            SpinnerColumn(),
+            TextColumn("Moving into slag"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            console=make_console(args.color, stderr=True),
+            transient=True,
+        )
+        display.start()
+        task = display.add_task("Moving into slag", total=sum(item.size for item in copies))
+        def progress(completed: int, _size: int) -> None:
+            display.update(task, completed=completed)
+    try:
+        copied, skipped = apply_slag(copies, progress)
+    except ValueError as error:
+        make_console(args.color, stderr=True).print(f"[red]Slag refused:[/red] {error}")
+        return 1
+    finally:
+        if display:
+            display.stop()
+    if not args.json:
+        console.print(
+            f"[green]Moved {copied}; removed {skipped} exact existing source copies.[/green]"
+        )
     return 0
 
 

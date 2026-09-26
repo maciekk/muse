@@ -13,8 +13,8 @@ from muse.duplicates import find_duplicates
 from muse.tree_diff import compare_trees
 
 PLAN_NAME = "compact-plan.json"
-REMOVABLE_AREAS = frozenset({"backlog", "stopgap"})
-RETENTION_PRIORITY = {"master": 0, "backlog": 1, "stopgap": 2, "incoming": 3}
+REMOVABLE_AREAS = frozenset({"backlog", "stopgap", "slag"})
+RETENTION_PRIORITY = {"master": 0, "backlog": 1, "stopgap": 2, "incoming": 3, "slag": 4}
 
 
 @dataclass(frozen=True)
