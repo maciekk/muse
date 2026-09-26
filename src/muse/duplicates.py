@@ -6,7 +6,7 @@ import hashlib
 import os
 import sqlite3
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -487,7 +487,7 @@ def _analyze(
 
 
 def find_duplicates(
-    target: Path,
+    target: Path | Sequence[Path],
     database: Path,
     *,
     rehash: bool = False,
@@ -496,26 +496,35 @@ def find_duplicates(
 ) -> DuplicateReport:
     """Find exact duplicates, retaining hashes in SQLite for later scans."""
     started = perf_counter()
-    target = target.absolute()
+    targets = (
+        [target.absolute()]
+        if isinstance(target, Path)
+        else [path.absolute() for path in target]
+    )
     database = database.absolute()
-    report = DuplicateReport(str(target), str(database))
+    report = DuplicateReport(", ".join(map(str, targets)), str(database))
 
-    try:
-        exists = target.exists()
-        supported = target.is_file() or target.is_dir()
-    except OSError as error:
-        report.errors.append(ScanError(str(target), str(error)))
+    for scan_target in targets:
+        try:
+            exists = scan_target.exists()
+            supported = scan_target.is_file() or scan_target.is_dir()
+        except OSError as error:
+            report.errors.append(ScanError(str(scan_target), str(error)))
+            continue
+        if not exists:
+            report.errors.append(ScanError(str(scan_target), "path does not exist"))
+        elif not supported:
+            report.errors.append(
+                ScanError(str(scan_target), "path is not a regular file or directory")
+            )
+    if report.errors:
         report.elapsed_seconds = perf_counter() - started
         return report
-
-    if not exists:
-        report.errors.append(ScanError(str(target), "path does not exist"))
+    if trees and len(targets) != 1:
+        report.errors.append(ScanError("--trees", "accepts exactly one target"))
         report.elapsed_seconds = perf_counter() - started
         return report
-    if not supported:
-        report.errors.append(ScanError(str(target), "path is not a regular file or directory"))
-        report.elapsed_seconds = perf_counter() - started
-        return report
+    display_target = targets[0]
 
     database.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(database)
@@ -523,14 +532,13 @@ def find_duplicates(
 
     try:
         phase_started = perf_counter()
-        inventory = _inventory(
-            target,
-            database.parent,
-            connection,
-            report,
-            rehash,
-            progress,
-        )
+        inventory = []
+        for scan_target in targets:
+            inventory.extend(
+                _inventory(
+                    scan_target, database.parent, connection, report, rehash, progress
+                )
+            )
         size_counts = Counter(candidate.size for candidate in inventory)
         candidates = inventory if trees else [
             candidate for candidate in inventory if size_counts[candidate.size] > 1
@@ -546,15 +554,15 @@ def find_duplicates(
         report.inventory_seconds = perf_counter() - phase_started
 
         phase_started = perf_counter()
-        by_hash, hashes = _collect_hashes(candidates, target, connection, report, progress)
+        by_hash, hashes = _collect_hashes(candidates, display_target, connection, report, progress)
         report.hashing_seconds = perf_counter() - phase_started
 
         phase_started = perf_counter()
         _analyze(by_hash, report, progress)
         if trees:
-            directories = _directory_paths(target, database.parent, report.errors)
+            directories = _directory_paths(display_target, database.parent, report.errors)
             if not report.errors:
-                _analyze_trees(target, directories, hashes, report)
+                _analyze_trees(display_target, directories, hashes, report)
         report.analysis_seconds = perf_counter() - phase_started
     finally:
         connection.close()

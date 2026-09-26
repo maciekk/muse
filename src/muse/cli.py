@@ -117,9 +117,9 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
         "dupes", help="find exact duplicate files using cached SHA-256 hashes"
     )
     dupes.add_argument(
-        "target",
-        nargs="?",
-        help="path to inspect; relative paths are resolved beneath the library root",
+        "targets",
+        nargs="*",
+        help="paths to inspect; relative paths are resolved beneath the library root",
     )
     dupes.add_argument(
         "--rehash",
@@ -527,11 +527,11 @@ def _tree_summary_rows(report: DuplicateReport) -> list[tuple[str, str]]:
 
 
 def _dupes(args: argparse.Namespace, root: Path) -> int:
-    target = resolve_target(root, args.target)
+    targets = [resolve_target(root, target) for target in args.targets] or [root]
     progress = _DuplicateProgressDisplay(args.progress, args.color)
     try:
         report = find_duplicates(
-            target,
+            targets,
             root / ".muse" / "muse.db",
             rehash=args.rehash,
             trees=args.trees,
@@ -546,7 +546,7 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
         console = make_console(args.color)
         title = "Exact duplicate directory trees" if args.trees else "Exact duplicate files"
         console.print(f"[bold]{title}[/bold]")
-        console.print("[dim]Target[/dim]", str(target))
+        console.print("[dim]Targets[/dim]", ", ".join(map(str, targets)))
         console.print("[dim]Hash cache[/dim]", report.database, "\n")
         print_table(
             console,
