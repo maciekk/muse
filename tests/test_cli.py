@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 from muse.cli import main
@@ -96,6 +97,18 @@ def test_stats_is_read_only_and_classifies_audio(tmp_path: Path, capsys) -> None
     assert report["areas"]["backlog"]["logical_bytes"] == 4
     assert report["state_created"] is False
     assert sorted(root.rglob("*")) == before
+
+
+def test_stats_labels_files_without_an_extension(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    (root / "backlog" / "README").write_text("notes")
+
+    result = main(["--root", str(root), "--color", "never", "stats"])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "(no extension)" in output
 
 
 def test_dupes_reports_exact_files_and_persists_hashes(tmp_path: Path, capsys) -> None:
@@ -198,7 +211,33 @@ def test_import_plans_then_applies_audio_only_directory(
     make_layout(root)
     source = root / "backlog" / "album"
     source.mkdir()
-    (source / "song.flac").write_bytes(b"audio")
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=0.05",
+            "-metadata",
+            "title=Song",
+            "-metadata",
+            "artist=Artist",
+            "-metadata",
+            "album=Album",
+            "-metadata",
+            "album_artist=Artist",
+            "-metadata",
+            "track=1/1",
+            "-metadata",
+            "disc=1/1",
+            "-c:a",
+            "flac",
+            str(source / "song.flac"),
+        ],
+        check=True,
+    )
 
     result = main(
         ["--root", str(root), "import", "backlog/album", "games/new-album", "--json"]

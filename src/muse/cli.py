@@ -171,7 +171,7 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     commands.add_parser("help", help="show help for Muse or one command")
 
     import_command = commands.add_parser(
-        "import", help="plan or apply an audio-only import into master"
+        "import", help="strictly validate, plan, or apply an album import into master"
     )
     import_command.add_argument("source", help="directory beneath backlog to import")
     import_command.add_argument(
@@ -385,7 +385,10 @@ def _stats(args: argparse.Namespace, root: Path) -> int:
         if total.extensions:
             console.print("[bold]Extensions[/bold]")
             extension_rows = [
-                (extension, human_number(count))
+                (
+                    "(no extension)" if extension == "[no extension]" else extension,
+                    human_number(count),
+                )
                 for extension, count in sorted(
                     total.extensions.items(), key=lambda item: (-item[1], item[0])
                 )
@@ -873,7 +876,7 @@ def _slag(args: argparse.Namespace, root: Path) -> int:
                     (
                         str(item.source.relative_to(root / "slag")),
                         human_bytes(item.size),
-                        item.source.suffix.lower() or "[no extension]",
+                        item.source.suffix.lower() or "(no extension)",
                     )
                     for item in copies
                 ]
@@ -1070,7 +1073,7 @@ def _import(args: argparse.Namespace, root: Path) -> int:
 
 
 def _show_import_plan(console: Any, plan: Any) -> None:
-    console.print("[bold]Audio-only import plan[/bold]")
+    console.print("[bold]Strictly validated import plan[/bold]")
     console.print("[dim]Source[/dim]", plan.source)
     console.print("[dim]Destination[/dim]", plan.destination)
     print_table(
@@ -1078,7 +1081,8 @@ def _show_import_plan(console: Any, plan: Any) -> None:
         ("METRIC", "VALUE"),
         [
             ("Status", plan.state),
-            ("Audio files", human_number(len(plan.files))),
+            ("Validated audio files", human_number(len(plan.files))),
+            ("Duration", human_duration(plan.duration_seconds)),
             ("Logical size", human_bytes(plan.logical_bytes)),
         ],
         right_aligned=frozenset({"VALUE"}),
