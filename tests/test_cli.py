@@ -517,6 +517,60 @@ def test_import_plans_then_applies_audio_only_directory(
     assert (root / "master" / "games" / "new-album" / "song.flac").is_file()
 
 
+def test_import_asks_to_accept_inconsistent_album_artists(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    source = root / "backlog" / "soundtrack"
+    source.mkdir()
+    for track, album_artist in ((1, "Kenji Kawai"), (2, "Kimiko Itoh")):
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=0.05",
+                "-metadata",
+                f"title=Track {track}",
+                "-metadata",
+                f"artist={album_artist}",
+                "-metadata",
+                "album=Soundtrack",
+                "-metadata",
+                f"album_artist={album_artist}",
+                "-metadata",
+                f"track={track}/2",
+                "-metadata",
+                "disc=1/1",
+                "-c:a",
+                "flac",
+                str(source / f"{track:02}.flac"),
+            ],
+            check=True,
+        )
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "yes")
+    result = main(
+        [
+            "--root",
+            str(root),
+            "import",
+            "soundtrack",
+            "movies-tv/Soundtrack",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "Review required" in output
+    assert "Kenji Kawai, Kimiko Itoh" in output
+    assert "accepted inconsistent album artist tags" in output
+
+
 def test_scan_json_reports_files_absent_from_all_vault_areas(
     tmp_path: Path, capsys
 ) -> None:

@@ -58,6 +58,7 @@ class ImportPlan:
     files: tuple[ImportFile, ...]
     artifacts: tuple[ImportArtifact, ...] = ()
     fixups: tuple[str, ...] = ()
+    accepted_inconsistent_album_artists: bool = False
 
     @property
     def logical_bytes(self) -> int:
@@ -73,16 +74,20 @@ class ImportPlan:
         for item in self.files:
             key = (item.media.codec, item.media.sample_rate, item.media.bit_depth)
             technical[key] = technical.get(key, 0) + 1
-        if len(technical) <= 1:
-            return ()
-        details = ", ".join(
-            f"{codec}/{rate} Hz/{depth or 'unknown'} bit ({count} "
-            f"{'file' if count == 1 else 'files'})"
-            for (codec, rate, depth), count in sorted(
-                technical.items(), key=lambda value: str(value[0])
+        warnings: list[str] = []
+        if len(technical) > 1:
+            details = ", ".join(
+                f"{codec}/{rate} Hz/{depth or 'unknown'} bit ({count} "
+                f"{'file' if count == 1 else 'files'})"
+                for (codec, rate, depth), count in sorted(
+                    technical.items(), key=lambda value: str(value[0])
+                )
             )
-        )
-        return (f"mixed source audio parameters preserved as-is: {details}",)
+            warnings.append(f"mixed source audio parameters preserved as-is: {details}")
+        if self.accepted_inconsistent_album_artists:
+            artists = sorted({item.media.album_artist for item in self.files})
+            warnings.append(f"accepted inconsistent album artist tags: {', '.join(artists)}")
+        return tuple(warnings)
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -130,11 +135,15 @@ def _hash(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _album_blockers(files: list[ImportFile]) -> list[str]:
+def _album_blockers(
+    files: list[ImportFile], *, accept_inconsistent_album_artists: bool = False
+) -> list[str]:
     blockers: list[str] = []
     for field, label in (("album", "album"), ("album_artist", "album artist")):
         values = {getattr(item.media, field) for item in files}
-        if len(values) > 1:
+        if len(values) > 1 and not (
+            field == "album_artist" and accept_inconsistent_album_artists
+        ):
             blockers.append(f"inconsistent {label} tags: {', '.join(sorted(values))}")
 
     positions: dict[tuple[int, int], list[str]] = {}
@@ -170,7 +179,10 @@ def _album_blockers(files: list[ImportFile]) -> list[str]:
 
 
 def _inventory(
-    source: Path, *, validate_release: bool = True
+    source: Path,
+    *,
+    validate_release: bool = True,
+    accept_inconsistent_album_artists: bool = False,
 ) -> tuple[tuple[ImportFile, ...], tuple[ImportArtifact, ...]]:
     if not source.exists():
         raise ValueError("source does not exist")
@@ -232,7 +244,12 @@ def _inventory(
     if not files and not blockers:
         blockers.append("source contains no audio files")
     if files and validate_release:
-        blockers.extend(_album_blockers(files))
+        blockers.extend(
+            _album_blockers(
+                files,
+                accept_inconsistent_album_artists=accept_inconsistent_album_artists,
+            )
+        )
     if blockers:
         raise ImportValidationError(blockers)
     return tuple(files), tuple(artifacts)
@@ -331,6 +348,12 @@ def _path_component(value: str, label: str) -> str:
 
 
 def _suggested_destination(source: Path, files: tuple[ImportFile, ...], profile: str) -> Path:
+    album_artists = {item.media.album_artist for item in files}
+    if len(album_artists) > 1:
+        raise ValueError(
+            "cannot suggest an artists/ destination with inconsistent album artist tags; "
+            "provide an explicit destination"
+        )
     media = files[0].media
     artist = _path_component(media.album_artist, "album artist")
     album = _path_component(media.album, "album")
@@ -346,7 +369,11 @@ def _suggested_destination(source: Path, files: tuple[ImportFile, ...], profile:
 
 
 def make_plan(
-    root: Path, source: Path, destination: str | Path | None = None
+    root: Path,
+    source: Path,
+    destination: str | Path | None = None,
+    *,
+    accept_inconsistent_album_artists: bool = False,
 ) -> ImportPlan:
     """Validate a release or single and create or replace its one ready import plan."""
     source_text = _relative_source(root, source)
@@ -357,7 +384,14 @@ def make_plan(
     if path.exists() and load_plan(root, source).state == "applying":
         raise ValueError("an applying import plan cannot be replaced")
     fixups = _prepare(source)
-    files, artifacts = _inventory(source, validate_release=source.is_dir())
+    files, artifacts = _inventory(
+        source,
+        validate_release=source.is_dir(),
+        accept_inconsistent_album_artists=accept_inconsistent_album_artists,
+    )
+    accepted_inconsistent_album_artists = accept_inconsistent_album_artists and len(
+        {item.media.album_artist for item in files}
+    ) > 1
     media = files[0].media if len(files) == 1 else None
     standalone = media is not None and (
         media.track_number == 1
@@ -384,6 +418,7 @@ def make_plan(
         files=files,
         artifacts=artifacts,
         fixups=fixups,
+        accepted_inconsistent_album_artists=accepted_inconsistent_album_artists,
     )
     _write(path, plan)
     return plan
@@ -417,6 +452,9 @@ def load_plan(root: Path, source: Path) -> ImportPlan:
         ),
         artifacts=tuple(ImportArtifact(**item) for item in value.get("artifacts", [])),
         fixups=tuple(value.get("fixups", [])),
+        accepted_inconsistent_album_artists=value.get(
+            "accepted_inconsistent_album_artists", False
+        ),
     )
 
 
@@ -425,9 +463,14 @@ def _verify(
     expected: tuple[ImportFile, ...],
     expected_artifacts: tuple[ImportArtifact, ...],
     profile: str,
+    accepted_inconsistent_album_artists: bool,
 ) -> None:
     try:
-        actual, actual_artifacts = _inventory(path, validate_release=profile != "selection")
+        actual, actual_artifacts = _inventory(
+            path,
+            validate_release=profile != "selection",
+            accept_inconsistent_album_artists=accepted_inconsistent_album_artists,
+        )
     except ImportValidationError as error:
         raise ValueError(f"content has changed since the import was planned: {error}") from error
     if actual != expected or actual_artifacts != expected_artifacts:
@@ -450,7 +493,13 @@ def apply_plan(root: Path, source: Path) -> ImportPlan:
     if source_exists:
         if plan.state not in {"ready", "applying"}:
             raise ValueError(f"plan cannot be applied from state {plan.state}")
-        _verify(source_path, plan.files, plan.artifacts, plan.profile)
+        _verify(
+            source_path,
+            plan.files,
+            plan.artifacts,
+            plan.profile,
+            plan.accepted_inconsistent_album_artists,
+        )
         applying = ImportPlan(**{**plan.__dict__, "state": "applying"})
         _write(path, applying)
         _reject_symlink_ancestors(root, destination.parent)
@@ -460,7 +509,13 @@ def apply_plan(root: Path, source: Path) -> ImportPlan:
             raise ValueError(f"cannot create destination directories: {error}") from error
         source_path.rename(destination)
         plan = applying
-    _verify(destination, plan.files, plan.artifacts, plan.profile)
+    _verify(
+        destination,
+        plan.files,
+        plan.artifacts,
+        plan.profile,
+        plan.accepted_inconsistent_album_artists,
+    )
 
     completed = ImportPlan(**{**plan.__dict__, "state": "completed"})
     _write(path, completed)

@@ -14,6 +14,7 @@ def make_track(
     codec: str = "flac",
     total: int = 2,
     sample_rate: int | None = None,
+    album_artist: str = "Artist",
 ) -> None:
     command = [
         "ffmpeg",
@@ -31,7 +32,7 @@ def make_track(
         "-metadata",
         f"album={album}",
         "-metadata",
-        "album_artist=Artist",
+        f"album_artist={album_artist}",
         "-metadata",
         f"track={track}/{total}",
         "-metadata",
@@ -188,6 +189,29 @@ def test_apply_resumes_after_directory_was_renamed(tmp_path: Path) -> None:
 
     assert completed.state == "completed"
     assert destination.is_dir()
+
+
+def test_plan_can_accept_inconsistent_album_artists_durably(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = root / "backlog" / "soundtrack"
+    source.mkdir(parents=True)
+    make_track(source / "01.flac", 1, album_artist="Kenji Kawai")
+    make_track(source / "02.flac", 2, album_artist="Kimiko Itoh")
+
+    with pytest.raises(ValueError, match="inconsistent album artist tags"):
+        make_plan(root, source, "movies-tv/Soundtrack")
+
+    plan = make_plan(
+        root,
+        source,
+        "movies-tv/Soundtrack",
+        accept_inconsistent_album_artists=True,
+    )
+
+    assert plan.accepted_inconsistent_album_artists is True
+    assert "Kenji Kawai, Kimiko Itoh" in plan.warnings[0]
+    completed = apply_plan(root, source)
+    assert completed.state == "completed"
 
 
 def test_import_refuses_changed_or_non_audio_content(tmp_path: Path) -> None:

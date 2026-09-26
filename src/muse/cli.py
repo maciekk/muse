@@ -30,6 +30,7 @@ from muse.cache import CachePruneReport, prune_missing
 from muse.compaction import CompactProgress, apply_plan, load_plan, make_plan, save_plan
 from muse.config import MANAGED_AREAS, MASTER_SHELVES, resolve_root, resolve_target
 from muse.duplicates import DuplicateGroup, DuplicateReport, ProgressUpdate, find_duplicates
+from muse.importing import ImportValidationError
 from muse.importing import abort_plan as abort_import_plan
 from muse.importing import apply_plan as apply_import_plan
 from muse.importing import load_plan as load_import_plan
@@ -1698,6 +1699,42 @@ def _slag(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def _make_import_plan_with_confirmation(
+    args: argparse.Namespace, root: Path, source: Path
+) -> Any:
+    try:
+        return make_import_plan(root, source, args.destination)
+    except ImportValidationError as error:
+        issue = next(
+            (
+                blocker
+                for blocker in error.blockers
+                if blocker.startswith("inconsistent album artist tags:")
+            ),
+            None,
+        )
+        if issue is None:
+            raise
+        if args.json:
+            raise ValueError(
+                f"{issue}; rerun without --json to review and accept it"
+            ) from error
+        console = make_console(args.color)
+        console.print(f"[yellow]Review required:[/yellow] {issue}")
+        try:
+            accepted = input("Are these album artist tags intentional? [y/N] ")
+        except EOFError:
+            accepted = ""
+        if accepted.strip().lower() not in {"y", "yes"}:
+            raise ValueError("inconsistent album artist tags were not accepted") from error
+        return make_import_plan(
+            root,
+            source,
+            args.destination,
+            accept_inconsistent_album_artists=True,
+        )
+
+
 def _import(args: argparse.Namespace, root: Path) -> int:
     source_value = Path(args.source).expanduser()
     if not source_value.is_absolute() and source_value.parts[:1] not in {
@@ -1725,13 +1762,13 @@ def _import(args: argparse.Namespace, root: Path) -> int:
             plan = apply_import_plan(root, source)
             action = "completed"
         elif args.destination is not None:
-            plan = make_import_plan(root, source, args.destination)
+            plan = _make_import_plan_with_confirmation(args, root, source)
             action = "planned"
         elif import_plan_path(root, source).is_file():
             plan = load_import_plan(root, source)
             action = "shown"
         else:
-            plan = make_import_plan(root, source)
+            plan = _make_import_plan_with_confirmation(args, root, source)
             action = "planned"
             destination_suggested = True
     except (FileNotFoundError, ValueError) as error:
