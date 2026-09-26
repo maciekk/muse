@@ -46,7 +46,7 @@ def _text(tags: object, *keys: str) -> str | None:
     return None
 
 
-def repair_tags(path: Path) -> tuple[str, ...]:
+def repair_tags(path: Path, *, single: bool = False) -> tuple[str, ...]:
     """Fill only deterministic missing tags, without transcoding audio."""
     suffix = path.suffix.lower()
     changes: list[str] = []
@@ -64,9 +64,10 @@ def repair_tags(path: Path) -> tuple[str, ...]:
                 tags.add(TPE2(encoding=3, text=[artist]))
                 changes.append(f"{path.name}: album artist = {artist}")
             match = _TRACK_PREFIX.match(path.name)
-            if not _text(tags, "TRCK") and match:
-                tags.add(TRCK(encoding=3, text=[str(int(match.group(1)))]))
-                changes.append(f"{path.name}: track = {int(match.group(1))}")
+            if not _text(tags, "TRCK") and (single or match):
+                track = "1/1" if single else str(int(match.group(1) if match else 1))
+                tags.add(TRCK(encoding=3, text=[track]))
+                changes.append(f"{path.name}: track = {track}")
             if not _text(tags, "TPOS"):
                 tags.add(TPOS(encoding=3, text=["1/1"]))
                 changes.append(f"{path.name}: disc = 1/1")
@@ -97,9 +98,10 @@ def repair_tags(path: Path) -> tuple[str, ...]:
                 tags.add(TPE2(encoding=3, text=[artist]))
                 changes.append(f"{path.name}: album artist = {artist}")
             match = _TRACK_PREFIX.match(path.name)
-            if not _text(tags, "TRCK") and match:
-                tags.add(TRCK(encoding=3, text=[str(int(match.group(1)))]))
-                changes.append(f"{path.name}: track = {int(match.group(1))}")
+            if not _text(tags, "TRCK") and (single or match):
+                track = "1/1" if single else str(int(match.group(1) if match else 1))
+                tags.add(TRCK(encoding=3, text=[track]))
+                changes.append(f"{path.name}: track = {track}")
             if not _text(tags, "TPOS"):
                 tags.add(TPOS(encoding=3, text=["1/1"]))
                 changes.append(f"{path.name}: disc = 1/1")
@@ -114,9 +116,10 @@ def repair_tags(path: Path) -> tuple[str, ...]:
                 tags["aART"] = [artist]
                 changes.append(f"{path.name}: album artist = {artist}")
             match = _TRACK_PREFIX.match(path.name)
-            if not tags.get("trkn") and match:
-                tags["trkn"] = [(int(match.group(1)), 0)]
-                changes.append(f"{path.name}: track = {int(match.group(1))}")
+            if not tags.get("trkn") and (single or match):
+                number = 1 if single else int(match.group(1) if match else 1)
+                tags["trkn"] = [(number, 1 if single else 0)]
+                changes.append(f"{path.name}: track = {number}{'/1' if single else ''}")
             if not tags.get("disk"):
                 tags["disk"] = [(1, 1)]
                 changes.append(f"{path.name}: disc = 1/1")
@@ -131,9 +134,10 @@ def repair_tags(path: Path) -> tuple[str, ...]:
                 tags["albumartist"] = [artist]
                 changes.append(f"{path.name}: album artist = {artist}")
             match = _TRACK_PREFIX.match(path.name)
-            if not _text(tags, "tracknumber", "track") and match:
-                tags["tracknumber"] = [str(int(match.group(1)))]
-                changes.append(f"{path.name}: track = {int(match.group(1))}")
+            if not _text(tags, "tracknumber", "track") and (single or match):
+                track = "1/1" if single else str(int(match.group(1) if match else 1))
+                tags["tracknumber"] = [track]
+                changes.append(f"{path.name}: track = {track}")
             if not _text(tags, "discnumber", "disc"):
                 tags["discnumber"] = ["1/1"]
                 changes.append(f"{path.name}: disc = 1/1")

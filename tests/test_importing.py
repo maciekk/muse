@@ -129,6 +129,45 @@ def test_plan_and_apply_single_file_into_shared_directory(tmp_path: Path) -> Non
     assert source.parent.is_dir()
 
 
+def test_import_into_singles_fills_missing_track_and_disc_as_one_of_one(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "vault"
+    source = root / "backlog" / "47 song.flac"
+    source.parent.mkdir(parents=True)
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=0.05",
+            "-metadata",
+            "title=Song",
+            "-metadata",
+            "artist=Artist",
+            "-metadata",
+            "album=Single",
+            "-metadata",
+            "album_artist=Artist",
+            str(source),
+        ],
+        check=True,
+    )
+
+    plan = make_plan(root, source, "artists/Artist/singles/Single")
+
+    assert plan.profile == "standalone-single"
+    assert plan.files[0].media.track_number == 1
+    assert plan.files[0].media.track_total == 1
+    assert plan.files[0].media.disc_number == 1
+    assert plan.files[0].media.disc_total == 1
+    assert f"{source.name}: track = 1/1" in plan.fixups
+    assert f"{source.name}: disc = 1/1" in plan.fixups
+
+
 def test_single_album_track_uses_selection_profile_and_preserves_position(
     tmp_path: Path,
 ) -> None:

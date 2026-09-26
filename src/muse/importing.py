@@ -269,7 +269,7 @@ def _inventory(
     return tuple(files), tuple(artifacts)
 
 
-def _prepare(source: Path) -> tuple[str, ...]:
+def _prepare(source: Path, *, single: bool = False) -> tuple[str, ...]:
     """Apply deterministic tag defaults and embed an unambiguous nearby cover."""
     audio_paths = (
         [source]
@@ -288,7 +288,7 @@ def _prepare(source: Path) -> tuple[str, ...]:
     changes: list[str] = []
     for audio in audio_paths:
         try:
-            changes.extend(repair_tags(audio))
+            changes.extend(repair_tags(audio, single=single))
             nearby = [cover for cover in covers if cover.parent == audio.parent]
             if not nearby and source.is_dir():
                 nearby = [cover for cover in covers if cover.parent == source]
@@ -407,7 +407,10 @@ def make_plan(
         )
     if path.exists() and load_plan(root, source).state == "applying":
         raise ValueError("an applying import plan cannot be replaced")
-    fixups = _prepare(source)
+    importing_into_singles = destination_path is not None and "singles" in (
+        destination_path.relative_to(root / "master").parts
+    )
+    fixups = _prepare(source, single=importing_into_singles)
     files, artifacts = _inventory(
         source,
         validate_release=source.is_dir(),

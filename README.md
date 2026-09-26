@@ -139,7 +139,7 @@ muse mv old-path new-path             # move content and preserve cached hashes
 The `import` implementation accepts nonempty release directories and individual audio files beneath `backlog/`. It:
 
 - uses ffprobe and ffmpeg to recognize and fully decode MP3, M4A (AAC or Apple Lossless), Ogg Vorbis/Opus, common PCM WAV, and FLAC;
-- fills deterministic missing metadata: album artist from artist, track number from a numeric filename prefix, and disc number as `1/1`;
+- fills deterministic missing metadata: album artist from artist, track number from a numeric filename prefix, and disc number as `1/1`; imports explicitly destined for a `singles/` directory get missing track and disc numbers as `1/1`;
 - checks essential tags and release numbering after those fixups;
 - shows inconsistent album artist values for review and, in interactive mode, allows the user to accept intentional differences as a recorded warning;
 - preserves the original album position of an individually imported selection;
