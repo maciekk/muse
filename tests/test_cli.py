@@ -483,6 +483,61 @@ def test_scan_json_reports_files_absent_from_all_vault_areas(
     assert report["not_found_in_vault"]["items"][0]["path"] == "lost.mp3"
 
 
+def test_scan_leads_with_target_extensions_and_groups_examples_by_directory(
+    tmp_path: Path, capsys
+) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    target = tmp_path / "old-drive"
+    album = target / "Albums" / "Live"
+    album.mkdir(parents=True)
+    for index in range(6):
+        (album / f"track-{index}.mp3").write_bytes(b"x" * (index + 1))
+    movies = target / "Home Movies"
+    movies.mkdir()
+    (movies / "birthday.mp4").write_bytes(b"video")
+
+    result = main(["--root", str(root), "--color", "never", "scan", str(target)])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert output.index("Definite audio file types") < output.index("CATEGORY")
+    assert ".mp3" in output and ".mp4" not in output
+    assert "AUDIO FILES" in output
+    assert "Albums/Live" in output
+    assert "Home Movies" not in output
+    assert "…and 1 more" in output
+    assert "birthday.mp4" not in output
+    assert "1 definite audio" not in output
+    assert "6 definite audio files were not found" in output
+
+
+def test_scan_progress_can_be_forced(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    target = tmp_path / "old-drive"
+    target.mkdir()
+    (target / "song.flac").write_bytes(b"audio")
+
+    result = main(
+        [
+            "--root",
+            str(root),
+            "--color",
+            "never",
+            "scan",
+            str(target),
+            "--progress",
+            "always",
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert json.loads(captured.out)["target_summary"]["extensions"] == {".flac": 1}
+
+
 def test_relative_stats_target_is_beneath_root(tmp_path: Path, capsys) -> None:
     root = tmp_path / "music-vault"
     make_layout(root)

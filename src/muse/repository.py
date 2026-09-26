@@ -20,7 +20,8 @@ AUDIO_EXTENSIONS = frozenset(
         ".m4a",
         ".m4b",
         ".mp3",
-        ".mp4",
+        # .mp4 is deliberately excluded: it is a general video container and
+        # extension-only scans cannot distinguish audio releases from movies.
         ".mpc",
         ".ogg",
         ".oga",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,11 +30,24 @@ class ScannedFile:
         return self.extension in AUDIO_EXTENSIONS
 
 
+@dataclass(frozen=True)
+class ScanProgress:
+    """Progress while inventorying the external target."""
+
+    completed_files: int = 0
+    completed_bytes: int = 0
+    complete: bool = False
+
+
+ScanProgressCallback = Callable[[ScanProgress], None]
+
+
 @dataclass
 class ScanComparison:
     target: str
     mode: str
     vault_areas: tuple[str, ...]
+    inventory_files: int = 0
     target_files: int = 0
     target_bytes: int = 0
     target_audio_files: int = 0
@@ -41,6 +55,8 @@ class ScanComparison:
     present_bytes: int = 0
     present_audio_files: int = 0
     new_files: list[ScannedFile] = field(default_factory=list)
+    target_extensions: Counter[str] = field(default_factory=Counter)
+    target_extension_bytes: Counter[str] = field(default_factory=Counter)
     extensions: Counter[str] = field(default_factory=Counter)
     top_level: Counter[str] = field(default_factory=Counter)
     top_level_bytes: Counter[str] = field(default_factory=Counter)
@@ -70,6 +86,8 @@ class ScanComparison:
                 "files": self.target_files,
                 "audio_files": self.target_audio_files,
                 "logical_bytes": self.target_bytes,
+                "extensions": dict(sorted(self.target_extensions.items())),
+                "extension_logical_bytes": dict(sorted(self.target_extension_bytes.items())),
             },
             "present_in_vault": {
                 "files": self.present_files,
@@ -108,14 +126,22 @@ class ScanComparison:
         }
 
 
-def _inventory(target: Path, label_root: Path, errors: list[ScanError]) -> list[ScannedFile]:
+def _inventory(
+    target: Path,
+    label_root: Path,
+    errors: list[ScanError],
+    progress: ScanProgressCallback | None = None,
+) -> list[ScannedFile]:
     files: list[ScannedFile] = []
+    scanned_bytes = 0
     try:
         if target.is_symlink():
             errors.append(ScanError(str(target), "target must not be a symlink"))
             return files
         if target.is_file():
             stat_result = target.stat(follow_symlinks=False)
+            if progress:
+                progress(ScanProgress(1, stat_result.st_size))
             return [ScannedFile(target, target.name, stat_result.st_size)]
         if not target.exists():
             errors.append(ScanError(str(target), "path does not exist"))
@@ -144,13 +170,15 @@ def _inventory(target: Path, label_root: Path, errors: list[ScanError]) -> list[
                 if entry.is_dir(follow_symlinks=False):
                     pending.append(path)
                 elif entry.is_file(follow_symlinks=False):
-                    files.append(
-                        ScannedFile(
-                            path,
-                            str(path.relative_to(label_root)),
-                            entry.stat(follow_symlinks=False).st_size,
-                        )
+                    item = ScannedFile(
+                        path,
+                        str(path.relative_to(label_root)),
+                        entry.stat(follow_symlinks=False).st_size,
                     )
+                    files.append(item)
+                    scanned_bytes += item.size
+                    if progress:
+                        progress(ScanProgress(len(files), scanned_bytes))
             except OSError as error:
                 errors.append(ScanError(str(path), str(error)))
     files.sort(key=lambda item: item.relative.casefold())
@@ -199,6 +227,7 @@ def compare_with_vault(
     *,
     thorough: bool = False,
     max_threads: int | None = None,
+    progress: ScanProgressCallback | None = None,
 ) -> ScanComparison:
     """Find target files which have no likely or exact copy in the vault.
 
@@ -233,14 +262,37 @@ def compare_with_vault(
             )
             return report
 
-    target_files = _inventory(target, target if target.is_dir() else target.parent, report.errors)
+    if progress:
+        progress(ScanProgress())
+    target_inventory = _inventory(
+        target,
+        target if target.is_dir() else target.parent,
+        report.errors,
+        progress,
+    )
+    if progress:
+        progress(
+            ScanProgress(
+                len(target_inventory),
+                sum(item.size for item in target_inventory),
+                complete=True,
+            )
+        )
     vault_files: list[ScannedFile] = []
     for area in area_paths:
         vault_files.extend(_inventory(area, root, report.errors))
 
+    report.inventory_files = len(target_inventory)
+
+    # Scan is an audio-vault assessment. Other files are encountered while
+    # walking the target, but are not reported or compared.
+    target_files = [item for item in target_inventory if item.audio]
     report.target_files = len(target_files)
     report.target_bytes = sum(item.size for item in target_files)
-    report.target_audio_files = sum(item.audio for item in target_files)
+    report.target_audio_files = report.target_files
+    for item in target_files:
+        report.target_extensions[item.extension] += 1
+        report.target_extension_bytes[item.extension] += item.size
 
     if thorough:
         target_sizes = {item.size for item in target_files}

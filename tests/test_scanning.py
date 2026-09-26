@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from muse.scanning import compare_with_vault
+from muse.scanning import ScanProgress, compare_with_vault
 
 
 def test_quick_scan_compares_name_case_insensitively_and_size(tmp_path: Path) -> None:
@@ -31,17 +31,41 @@ def test_thorough_scan_matches_content_regardless_of_name(tmp_path: Path) -> Non
     (root / "incoming").mkdir(parents=True)
     target.mkdir()
     (root / "incoming" / "known.bin").write_bytes(b"same bytes")
-    (target / "renamed.dat").write_bytes(b"same bytes")
-    (target / "known.bin").write_bytes(b"different!")
-    (target / "empty").write_bytes(b"")
+    (target / "renamed.flac").write_bytes(b"same bytes")
+    (target / "known.mp3").write_bytes(b"different!")
+    (target / "empty.wav").write_bytes(b"")
     (root / "incoming" / "also-empty").write_bytes(b"")
 
     report = compare_with_vault(root, target, thorough=True, max_threads=2)
 
     assert report.present_files == 2
-    assert [item.relative for item in report.new_files] == ["known.bin"]
+    assert [item.relative for item in report.new_files] == ["known.mp3"]
     assert report.hashed_files == 5
     assert not report.errors
+
+
+def test_scan_reports_target_inventory_progress_and_extension_totals(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "vault"
+    target = tmp_path / "drive"
+    (root / "master").mkdir(parents=True)
+    target.mkdir()
+    (target / "song.mp3").write_bytes(b"audio")
+    (target / "movie.mp4").write_bytes(b"home movie")
+    updates: list[ScanProgress] = []
+
+    report = compare_with_vault(root, target, progress=updates.append)
+
+    assert updates[0] == ScanProgress()
+    assert updates[-1] == ScanProgress(2, 15, complete=True)
+    assert report.inventory_files == 2
+    assert report.target_files == 1
+    assert report.target_audio_files == 1
+    assert [item.relative for item in report.new_files] == ["song.mp3"]
+    assert report.target_extensions == {".mp3": 1}
+    assert report.target_extension_bytes == {".mp3": 5}
+    assert all(item.extension != ".mp4" for item in report.new_files)
 
 
 def test_scan_rejects_target_inside_vault(tmp_path: Path) -> None:
