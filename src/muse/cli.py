@@ -389,10 +389,11 @@ class _DuplicateProgressDisplay:
     _LONG_BYTES = 1024**3
     _LONG_FILES = 1_000
 
-    def __init__(self, mode: str, color: str) -> None:
+    def __init__(self, mode: str, color: str, *, trees: bool = False) -> None:
         self.console = make_console(color, stderr=True)
         self.enabled = mode == "always" or (mode == "auto" and sys.stderr.isatty())
         self.immediate = mode == "always"
+        self.trees = trees
         self.started_at = monotonic()
         self.phase: str | None = None
         self.task_id: int | None = None
@@ -429,7 +430,8 @@ class _DuplicateProgressDisplay:
             cache_total = update.cached_files + (update.total_files or 0)
             cache_rate = update.cached_files / cache_total if cache_total else 0.0
             return (
-                f"Hashing content — {human_number(update.completed_files)}/{total_files} files, "
+                f"{'Hashing content' if self.trees else 'Lazy-hashing'} — "
+                f"{human_number(update.completed_files)}/{total_files} files, "
                 f"{human_bytes(update.completed_bytes)}/{human_bytes(update.total_bytes or 0)}, "
                 f"cache {cache_rate:.1%}"
             )
@@ -533,7 +535,7 @@ def _tree_summary_rows(report: DuplicateReport) -> list[tuple[str, str]]:
 
 def _dupes(args: argparse.Namespace, root: Path) -> int:
     targets = [resolve_target(root, target) for target in args.targets] or [root]
-    progress = _DuplicateProgressDisplay(args.progress, args.color)
+    progress = _DuplicateProgressDisplay(args.progress, args.color, trees=args.trees)
     try:
         report = find_duplicates(
             targets,

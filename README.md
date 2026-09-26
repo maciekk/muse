@@ -79,6 +79,7 @@ Machine-readable JSON never contains terminal styling. Potentially slow operatio
 ## Roadmap
 
 - Add `muse prune` to preview and remove hash-cache entries for files no longer present in the vault, such as after a fully ingested backlog repository is retired.
+- Add `muse scan DIR` to compare music on a prospective external source against the vault, quickly identifying content not already present before deciding whether to add it to `backlog/`.
 
 ## Installation
 
