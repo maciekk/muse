@@ -26,6 +26,18 @@ def test_compaction_plan_prefers_master_and_removes_backlog_copy(tmp_path: Path)
     assert list((root / ".muse" / "audit").glob("compact-*.json"))
 
 
+def test_compaction_plan_preserves_paths_relative_to_library_root(tmp_path: Path) -> None:
+    root = tmp_path / "music-vault"
+    for name in ("one", "two"):
+        (root / "backlog" / name).mkdir(parents=True)
+        (root / "backlog" / name / "song.flac").write_bytes(b"audio")
+
+    operations, errors = make_plan(root, root / "backlog")
+
+    assert not errors
+    assert {operations[0].retain, operations[0].remove} == {"backlog/one", "backlog/two"}
+
+
 def test_compaction_refuses_changed_tree(tmp_path: Path) -> None:
     root = tmp_path / "music-vault"
     for name in ("one", "two"):

@@ -23,6 +23,15 @@ def test_bare_muse_prints_help_and_succeeds(capsys) -> None:
     assert "\n  COMMAND\n" not in output
 
 
+def test_help_command_shows_command_specific_usage(capsys) -> None:
+    assert main(["help", "dupes"]) == 0
+
+    output = capsys.readouterr().out
+    assert "Usage: muse dupes" in output
+    assert "--trees" in output
+    assert "--rehash" in output
+
+
 def test_help_honors_explicit_color_policy(capsys) -> None:
     assert main(["--color", "always"]) == 0
     colored = capsys.readouterr().out

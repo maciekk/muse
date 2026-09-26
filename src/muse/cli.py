@@ -152,8 +152,17 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     tree_diff.set_defaults(handler=_diff)
 
     compact = commands.add_parser("compact", help="plan exact duplicate-tree compaction")
-    compact.add_argument("action", nargs="?", choices=("show", "apply"))
+    compact.add_argument(
+        "target",
+        nargs="?",
+        help="path to compact; relative paths are resolved beneath the library root",
+    )
+    compact_actions = compact.add_mutually_exclusive_group()
+    compact_actions.add_argument("--show", action="store_true", help="show the pending plan")
+    compact_actions.add_argument("--apply", action="store_true", help="apply the pending plan")
     compact.set_defaults(handler=_compact)
+
+    commands.add_parser("help", help="show help for Muse or one command")
 
     relocation = commands.add_parser("mv", help="move content and preserve cached hashes")
     relocation.add_argument("source", help="existing path beneath the library root")
@@ -691,7 +700,10 @@ def _show_compact_plan(console: Any, operations: list[Any]) -> None:
 
 def _compact(args: argparse.Namespace, root: Path) -> int:
     console = make_console(args.color)
-    if args.action == "show":
+    if (args.show or args.apply) and args.target:
+        console.print("[red]A pending plan already defines its scope; omit the target.[/red]")
+        return 1
+    if args.show:
         try:
             operations = load_plan(root)
         except FileNotFoundError:
@@ -699,7 +711,7 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
             return 1
         _show_compact_plan(console, operations)
         return 0
-    if args.action == "apply":
+    if args.apply:
         try:
             operations = load_plan(root)
         except FileNotFoundError:
@@ -719,7 +731,13 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
         return 0
 
     console.print("[bold]Exact-tree compaction plan[/bold]")
-    operations, errors = make_plan(root)
+    target = resolve_target(root, args.target)
+    try:
+        target.relative_to(root)
+    except ValueError:
+        console.print("[red]Compaction target must be inside the library root.[/red]")
+        return 1
+    operations, errors = make_plan(root, target)
     if errors:
         console.print("[red]Compaction plan was not saved because scanning had errors.[/red]")
         return 1
@@ -775,8 +793,13 @@ def _help_color(argv: Sequence[str]) -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:1] == ["help"]:
+        arguments = [*arguments[1:], "--help"] if len(arguments) > 1 else ["--help"]
     parser = build_parser(_help_color(arguments))
-    args = parser.parse_args(arguments)
+    try:
+        args = parser.parse_args(arguments)
+    except SystemExit as error:
+        return int(error.code)
     if args.command is None:
         parser.print_help()
         return 0

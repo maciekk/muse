@@ -37,6 +37,7 @@ Muse never scans the OS-managed `~/Music/` directory by default.
 
 ```bash
 muse                       # show styled help
+muse help dupes            # show dupes arguments and options
 muse doctor                # inspect layout and supporting tools
 muse status                # show top-level repository status
 muse stats                 # count files and disk usage
@@ -47,8 +48,8 @@ muse dupes backlog         # inspect one path beneath the root
 muse dupes --rehash        # bypass the persistent hash cache
 muse dupes --trees backlog  # report maximal exact duplicate directory trees
 muse diff tree-a tree-b      # explain why two trees differ
-muse compact                  # create the sole pending compaction plan
-muse compact apply            # reverify, confirm, then apply that plan
+muse compact [backlog]        # create the sole pending compaction plan
+muse compact --apply          # reverify, confirm, then apply that plan
 muse mv old-path new-path     # move or rename content; preserve cached hashes
 muse dupes --progress always
 muse dupes --json

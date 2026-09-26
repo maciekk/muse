@@ -37,15 +37,20 @@ def _area(path: str) -> str:
     return Path(path).parts[0]
 
 
-def make_plan(root: Path) -> tuple[list[CompactOperation], list[dict[str, str]]]:
+def make_plan(
+    root: Path, target: Path | None = None
+) -> tuple[list[CompactOperation], list[dict[str, str]]]:
     """Create the sole pending plan from maximal exact duplicate trees."""
-    report = find_duplicates(root, root / ".muse" / "muse.db", trees=True)
+    target = root if target is None else target
+    report = find_duplicates(target, root / ".muse" / "muse.db", trees=True)
     if report.errors:
         return [], [error.to_dict() for error in report.errors]
 
     operations = []
+    prefix = target.relative_to(root)
     for group in report.tree_groups:
-        candidates = sorted(group.paths, key=lambda path: (RETENTION_PRIORITY[_area(path)], path))
+        paths = [str(prefix / path) for path in group.paths]
+        candidates = sorted(paths, key=lambda path: (RETENTION_PRIORITY[_area(path)], path))
         retain = candidates[0]
         for remove in candidates[1:]:
             if _area(remove) not in REMOVABLE_AREAS:
