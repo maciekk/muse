@@ -50,6 +50,7 @@ muse dupes                 # find exact duplicates across the library
 muse dupes backlog         # inspect one path beneath the root
 muse dupes --rehash        # bypass the persistent hash cache
 muse dupes --trees backlog  # report maximal exact duplicate directory trees
+muse prune                   # discard hashes for files that no longer exist
 muse diff tree-a tree-b      # explain why two trees differ
 muse compact [backlog]        # create the sole pending compaction plan
 muse compact --apply          # reverify, confirm, then apply that plan
@@ -61,7 +62,7 @@ muse dupes --progress always
 muse dupes --json
 ```
 
-Muse uses a flat command grammar: `muse COMMAND [PATH ...] [--OPTION ...]`. Positional arguments after the command are always filesystem scopes; operations use distinct command names or dashed options. `doctor`, `status`, and `stats` do not modify the repository or create Muse state. `dupes` never changes music files, but stores SHA-256 hashes and file size/modification-time metadata in `.muse/muse.db`; unchanged files reuse their cached hashes on later runs. Files with a size that occurs only once cannot be exact duplicates and are not hashed by the default report. `--trees` hashes every file because whole-tree equality requires complete coverage. Use `--rehash` to bypass cached hashes.
+Muse uses a flat command grammar: `muse COMMAND [PATH ...] [--OPTION ...]`. Positional arguments after the command are always filesystem scopes; operations use distinct command names or dashed options. `doctor`, `status`, and `stats` do not modify the repository or create Muse state. `dupes` never changes music files, but stores SHA-256 hashes and file size/modification-time metadata in `.muse/muse.db`; unchanged files reuse their cached hashes on later runs. Files with a size that occurs only once cannot be exact duplicates and are not hashed by the default report. `--trees` hashes every file because whole-tree equality requires complete coverage. Use `--rehash` to bypass cached hashes. `prune` immediately removes cache entries whose files no longer exist; it never changes library content, and an accidentally discarded hash can be recomputed.
 
 ## Terminal output
 

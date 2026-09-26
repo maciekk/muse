@@ -455,5 +455,4 @@ Tests should use explicit failpoints around durable writes, renames, verified co
 
 Previously identified work remains useful but is separate from import:
 
-- `muse prune` to preview and remove stale hash-cache entries after content moves or source retirement.
 - `muse scan DIR` to compare an external prospective source against the vault before adding it to backlog.

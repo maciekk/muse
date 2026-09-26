@@ -116,6 +116,28 @@ def test_dupes_reports_exact_files_and_persists_hashes(tmp_path: Path, capsys) -
     assert (root / ".muse" / "muse.db").is_file()
 
 
+def test_prune_reports_cache_maintenance_stats(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    first = root / "backlog" / "first.flac"
+    second = root / "backlog" / "second.flac"
+    first.write_bytes(b"same")
+    second.write_bytes(b"same")
+    assert main(["--root", str(root), "dupes", "backlog", "--json"]) == 0
+    capsys.readouterr()
+    second.unlink()
+
+    result = main(["--root", str(root), "prune", "--json"])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["database_exists"] is True
+    assert report["entries_before"] == 2
+    assert report["entries_removed"] == 1
+    assert report["entries_after"] == 1
+    assert report["represented_bytes_removed"] == 4
+
+
 def test_dupes_trees_reports_maximal_directory_copies(tmp_path: Path, capsys) -> None:
     root = tmp_path / "music-vault"
     make_layout(root)

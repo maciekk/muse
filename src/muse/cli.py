@@ -25,6 +25,7 @@ from rich.text import Text
 from rich_argparse import RichHelpFormatter
 
 from muse import __version__
+from muse.cache import CachePruneReport, prune_missing
 from muse.compaction import apply_plan, load_plan, make_plan, save_plan
 from muse.config import MANAGED_AREAS, MASTER_SHELVES, resolve_root, resolve_target
 from muse.duplicates import DuplicateGroup, DuplicateReport, ProgressUpdate, find_duplicates
@@ -141,6 +142,10 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     )
     _add_json_argument(dupes)
     dupes.set_defaults(handler=_dupes)
+
+    prune = commands.add_parser("prune", help="remove missing files from the hash cache")
+    _add_json_argument(prune)
+    prune.set_defaults(handler=_prune)
 
     tree_diff = commands.add_parser("diff", help="compare two directory trees exactly")
     tree_diff.add_argument("left", help="first tree; relative paths are beneath the library root")
@@ -650,6 +655,40 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
         )
 
     return 1 if report.errors else 0
+
+
+def _prune_rows(report: CachePruneReport) -> list[tuple[str, str]]:
+    return [
+        ("Elapsed", human_duration(report.elapsed_seconds)),
+        ("Entries examined", human_number(report.entries_before)),
+        ("Entries removed", human_number(report.entries_removed)),
+        ("Entries retained", human_number(report.entries_after)),
+        ("Missing-file logical size", human_bytes(report.represented_bytes_removed)),
+        ("Retained-file logical size", human_bytes(report.represented_bytes_after)),
+    ]
+
+
+def _prune(args: argparse.Namespace, root: Path) -> int:
+    report = prune_missing(root / ".muse" / "muse.db")
+    if args.json:
+        emit_json(report.to_dict())
+    else:
+        console = make_console(args.color)
+        console.print("[bold]Hash cache pruning[/bold]")
+        console.print("[dim]Database[/dim]", report.database, "\n")
+        print_table(
+            console,
+            ("METRIC", "VALUE"),
+            _prune_rows(report),
+            right_aligned=frozenset({"VALUE"}),
+        )
+        if not report.database_exists:
+            console.print("[dim]No hash database exists; nothing was changed.[/dim]")
+        elif report.entries_removed:
+            console.print("[green]Stale hash entries removed.[/green]")
+        else:
+            console.print("[dim]The hash cache was already clean.[/dim]")
+    return 0
 
 
 def _diff_summary_rows(report: TreeDiffReport) -> list[tuple[str, str]]:
