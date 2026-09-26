@@ -147,6 +147,19 @@ def test_dupes_shows_shared_filename_once_with_its_directories(tmp_path: Path, c
     assert "second" in output
 
 
+def test_mv_renames_content_and_reports_cached_hashes(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    (root / "backlog" / "old").mkdir()
+
+    result = main(["--root", str(root), "mv", "backlog/old", "backlog/new", "--json"])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["destination"] == str(root / "backlog" / "new")
+    assert (root / "backlog" / "new").is_dir()
+
+
 def test_relative_stats_target_is_beneath_root(tmp_path: Path, capsys) -> None:
     root = tmp_path / "music-vault"
     make_layout(root)

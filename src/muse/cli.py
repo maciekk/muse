@@ -27,6 +27,7 @@ from muse import __version__
 from muse.compaction import apply_plan, load_plan, make_plan, save_plan
 from muse.config import MANAGED_AREAS, MASTER_SHELVES, resolve_root, resolve_target
 from muse.duplicates import DuplicateGroup, DuplicateReport, ProgressUpdate, find_duplicates
+from muse.moves import move
 from muse.reporting import (
     emit_json,
     human_bytes,
@@ -153,6 +154,12 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     compact = commands.add_parser("compact", help="plan exact duplicate-tree compaction")
     compact.add_argument("action", nargs="?", choices=("show", "apply"))
     compact.set_defaults(handler=_compact)
+
+    relocation = commands.add_parser("mv", help="move content and preserve cached hashes")
+    relocation.add_argument("source", help="existing path beneath the library root")
+    relocation.add_argument("destination", help="new path beneath the library root")
+    _add_json_argument(relocation)
+    relocation.set_defaults(handler=_move)
 
     for name, actions in PLANNED_COMMANDS.items():
         planned = commands.add_parser(name, help=f"planned {name} operations (not implemented)")
@@ -721,6 +728,28 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
     console.print(
         "[dim]No files were changed. Review: muse compact show; apply: muse compact apply[/dim]"
     )
+    return 0
+
+
+def _move(args: argparse.Namespace, root: Path) -> int:
+    source = resolve_target(root, args.source)
+    destination = resolve_target(root, args.destination)
+    try:
+        result = move(root, source, destination)
+    except ValueError as error:
+        console = make_console(args.color, stderr=True)
+        console.print(f"[red]{args.command} refused:[/red] {error}")
+        return 1
+    if args.json:
+        emit_json(result.to_dict())
+    else:
+        console = make_console(args.color)
+        console.print(
+            f"[green]{args.command.capitalize()}d[/green] {result.source} → {result.destination}"
+        )
+        console.print(
+            f"[dim]Preserved {human_number(result.cached_paths_updated)} cached hash paths.[/dim]"
+        )
     return 0
 
 

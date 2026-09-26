@@ -49,6 +49,7 @@ muse dupes --trees backlog  # report maximal exact duplicate directory trees
 muse diff tree-a tree-b      # explain why two trees differ
 muse compact                  # create the sole pending compaction plan
 muse compact apply            # reverify, confirm, then apply that plan
+muse mv old-path new-path     # move or rename content; preserve cached hashes
 muse dupes --progress always
 muse dupes --json
 ```
