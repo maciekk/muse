@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import muse.tree_diff
 from muse.compaction import apply_plan, load_plan, make_plan, save_plan
 
 
@@ -87,6 +88,39 @@ def test_compaction_applies_through_symlinked_library_root(tmp_path: Path) -> No
     assert (receipt / operations[0].remove / "song.flac").is_file()
 
 
+def test_compaction_reverifies_a_shared_retained_tree_only_once(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "music-vault"
+    for name in ("one", "two", "three"):
+        directory = root / "backlog" / name
+        directory.mkdir(parents=True)
+        (directory / "song.flac").write_bytes(b"audio")
+    operations, errors = make_plan(root)
+    assert not errors
+    assert len(operations) == 2
+    save_plan(root, operations)
+
+    scans: list[Path] = []
+    original_walk = muse.tree_diff.os.walk
+
+    def recording_walk(path, *args, **kwargs):
+        scans.append(Path(path))
+        yield from original_walk(path, *args, **kwargs)
+
+    monkeypatch.setattr(muse.tree_diff.os, "walk", recording_walk)
+    monkeypatch.setattr(
+        "muse.compaction.fingerprint_trees",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("new plans should not read cached content hashes")
+        ),
+    )
+    apply_plan(root, operations)
+
+    assert len(scans) == 3
+    assert scans.count((root / operations[0].retain).resolve()) == 1
+
+
 def test_compaction_refuses_changed_tree(tmp_path: Path) -> None:
     root = tmp_path / "music-vault"
     for name in ("one", "two"):
@@ -103,3 +137,24 @@ def test_compaction_refuses_changed_tree(tmp_path: Path) -> None:
     else:
         raise AssertionError("changed tree was removed")
     assert (root / "backlog" / "two").exists()
+
+
+def test_compaction_refuses_when_both_planned_trees_changed_identically(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "music-vault"
+    for name in ("one", "two"):
+        directory = root / "backlog" / name
+        directory.mkdir(parents=True)
+        (directory / "song.flac").write_bytes(b"audio")
+    operations, errors = make_plan(root)
+    assert not errors
+    for name in ("one", "two"):
+        (root / "backlog" / name / "song.flac").write_bytes(b"changed")
+
+    try:
+        apply_plan(root, operations)
+    except ValueError as error:
+        assert "no longer match" in str(error)
+    else:
+        raise AssertionError("changed trees were removed")

@@ -79,6 +79,22 @@ def _add_json_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
 
 
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
+
+
+def _add_max_threads_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--max-threads",
+        type=_positive_int,
+        metavar="N",
+        help="limit concurrent hashing and scanning workers (default: up to 8)",
+    )
+
+
 def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     formatter = partial(MuseHelpFormatter, console=make_console(color))
     parser = argparse.ArgumentParser(
@@ -160,6 +176,7 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
         default="auto",
         help="progress display policy (default: auto)",
     )
+    _add_max_threads_argument(dupes)
     _add_json_argument(dupes)
     dupes.set_defaults(handler=_dupes)
 
@@ -182,6 +199,7 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     compact_actions = compact.add_mutually_exclusive_group()
     compact_actions.add_argument("--show", action="store_true", help="show the pending plan")
     compact_actions.add_argument("--apply", action="store_true", help="apply the pending plan")
+    _add_max_threads_argument(compact)
     compact.set_defaults(handler=_compact)
 
     commands.add_parser("help", help="show help for Muse or one command")
@@ -524,7 +542,8 @@ class _DuplicateProgressDisplay:
                 f"{'Hashing content' if self.trees else 'Lazy-hashing'} — "
                 f"{human_number(update.completed_files)}/{total_files} files, "
                 f"{human_bytes(update.completed_bytes)}/{human_bytes(update.total_bytes or 0)}, "
-                f"cache {cache_rate:.1%}"
+                f"cache {cache_rate:.1%}, using {update.worker_threads} worker "
+                f"{'thread' if update.worker_threads == 1 else 'threads'}"
             )
         return (
             f"Analyzing hashes — {human_number(update.completed_files)}/"
@@ -584,6 +603,7 @@ def _duplicate_summary_rows(report: DuplicateReport) -> list[tuple[str, str]]:
             "Cache hit rate",
             f"{report.cache_hit_rate:.1%} files · {report.byte_cache_hit_rate:.1%} bytes",
         ),
+        ("Hash workers", human_number(report.hash_worker_threads)),
         (
             "Data read",
             f"{human_bytes(report.bytes_read)} · "
@@ -611,6 +631,7 @@ def _tree_summary_rows(report: DuplicateReport) -> list[tuple[str, str]]:
             f"{human_bytes(report.bytes_read)} · "
             f"{human_bytes(round(report.hash_throughput))}/s",
         ),
+        ("Hash workers", human_number(report.hash_worker_threads)),
         ("Duplicate tree groups", human_number(len(report.tree_groups))),
         (
             "Redundant tree copies",
@@ -634,6 +655,7 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
             rehash=args.rehash,
             trees=args.trees,
             progress=progress.update,
+            max_threads=args.max_threads,
         )
     finally:
         progress.stop()
@@ -843,7 +865,8 @@ class _CompactProgressDisplay:
             if self.task_id is not None:
                 self.progress.remove_task(self.task_id)
             description = (
-                "Reverifying duplicate trees"
+                f"Reverifying duplicate trees — using {update.worker_threads} worker "
+                f"{'thread' if update.worker_threads == 1 else 'threads'}"
                 if update.phase == "verify"
                 else "Moving duplicate trees to trash"
             )
@@ -955,10 +978,23 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
         if confirmation != "TRASH":
             console.print("[yellow]Compaction cancelled.[/yellow]")
             return 1
-        console.print("[dim]Reverifying planned trees before moving them to trash…[/dim]")
+        distinct_paths = len(
+            {path for item in operations for path in (item.retain, item.remove)}
+        )
+        workers = (
+            min(args.max_threads or 8, distinct_paths, os.cpu_count() or 1)
+            if distinct_paths
+            else 0
+        )
+        console.print(
+            f"[dim]Reverifying planned trees before moving them to trash "
+            f"using {workers} worker {'thread' if workers == 1 else 'threads'}…[/dim]"
+        )
         progress = _CompactProgressDisplay(args.color)
         try:
-            receipt = apply_plan(root, operations, progress.update)
+            receipt = apply_plan(
+                root, operations, progress.update, max_threads=args.max_threads
+            )
         except ValueError as error:
             console.print(f"[red]Compaction refused:[/red] {error}")
             return 1
@@ -981,7 +1017,12 @@ def _compact(args: argparse.Namespace, root: Path) -> int:
     except ValueError:
         console.print("[red]Compaction target must be inside the library root.[/red]")
         return 1
-    operations, errors = make_plan(root, target)
+    worker_limit = min(args.max_threads or 8, os.cpu_count() or 1)
+    console.print(
+        f"[dim]Scanning with up to {worker_limit} worker "
+        f"{'thread' if worker_limit == 1 else 'threads'}…[/dim]"
+    )
+    operations, errors = make_plan(root, target, max_threads=args.max_threads)
     if errors:
         console.print("[red]Compaction plan was not saved because scanning had errors.[/red]")
         return 1

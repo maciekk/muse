@@ -7,9 +7,11 @@ import os
 import sqlite3
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 from time import perf_counter
 from typing import Any
 
@@ -27,6 +29,7 @@ class ProgressUpdate:
     total_bytes: int | None = None
     cached_files: int = 0
     cached_bytes: int = 0
+    worker_threads: int = 0
 
 
 ProgressCallback = Callable[[ProgressUpdate], None]
@@ -104,6 +107,7 @@ class DuplicateReport:
     cached_files: int = 0
     cached_bytes: int = 0
     bytes_read: int = 0
+    hash_worker_threads: int = 0
     inventory_seconds: float = 0.0
     hashing_seconds: float = 0.0
     analysis_seconds: float = 0.0
@@ -155,6 +159,7 @@ class DuplicateReport:
             "cache_hit_rate": self.cache_hit_rate,
             "byte_cache_hit_rate": self.byte_cache_hit_rate,
             "bytes_read": self.bytes_read,
+            "hash_worker_threads": self.hash_worker_threads,
             "hash_throughput_bytes_per_second": self.hash_throughput,
             "inventory_seconds": self.inventory_seconds,
             "hashing_seconds": self.hashing_seconds,
@@ -296,6 +301,7 @@ def _collect_hashes(
     connection: sqlite3.Connection,
     report: DuplicateReport,
     progress: ProgressCallback | None,
+    max_threads: int | None,
 ) -> tuple[dict[str, list[HashedFile]], dict[Path, str]]:
     by_hash: dict[str, list[HashedFile]] = defaultdict(list)
     hashes: dict[Path, str] = {}
@@ -318,32 +324,86 @@ def _collect_hashes(
                 total_bytes=uncached_bytes,
                 cached_files=report.cached_files,
                 cached_bytes=report.cached_bytes,
+                worker_threads=report.hash_worker_threads,
             ),
         )
 
+    report.hash_worker_threads = (
+        min(max_threads or 8, uncached_files, os.cpu_count() or 1)
+        if uncached_files
+        else 0
+    )
     notify_hashing()
+
+    def record(candidate: FileCandidate, sha256: str) -> None:
+        hashes[candidate.path] = sha256
+        by_hash[sha256].append(
+            HashedFile(
+                _display_path(candidate.path, target),
+                candidate.size,
+                sha256,
+            )
+        )
+
+    uncached = []
     for candidate in candidates:
+        if candidate.cached_sha256 is None:
+            uncached.append(candidate)
+            continue
         try:
             before = candidate.path.stat(follow_symlinks=False)
             if (before.st_size, before.st_mtime_ns) != (candidate.size, candidate.mtime_ns):
                 raise OSError("file changed after inventory")
+            record(candidate, candidate.cached_sha256)
+        except OSError as error:
+            report.errors.append(ScanError(str(candidate.path), str(error)))
 
-            sha256 = candidate.cached_sha256
-            if sha256 is None:
+    # hashlib releases the GIL while processing these large blocks. Independent
+    # files can therefore use multiple cores (and overlap storage latency), while
+    # all SQLite writes remain serialized in this thread.
+    progress_lock = Lock()
 
-                def record_bytes(count: int) -> None:
-                    nonlocal completed_bytes
-                    completed_bytes += count
-                    report.bytes_read += count
-                    notify_hashing()
+    def hash_candidate(candidate: FileCandidate) -> tuple[FileCandidate, str]:
+        before = candidate.path.stat(follow_symlinks=False)
+        if (before.st_size, before.st_mtime_ns) != (candidate.size, candidate.mtime_ns):
+            raise OSError("file changed after inventory")
 
-                sha256 = _sha256(candidate.path, record_bytes)
-                after = candidate.path.stat(follow_symlinks=False)
-                if (before.st_size, before.st_mtime_ns) != (
-                    after.st_size,
-                    after.st_mtime_ns,
-                ):
-                    raise OSError("file changed while being hashed")
+        def record_bytes(count: int) -> None:
+            # Reading bytes is not completion: the digest still has to finish,
+            # be checked against a final stat, and be stored. Keep accounting
+            # here, but advance progress only when the future is collected.
+            with progress_lock:
+                report.bytes_read += count
+
+        sha256 = _sha256(candidate.path, record_bytes)
+        after = candidate.path.stat(follow_symlinks=False)
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise OSError("file changed while being hashed")
+        return candidate, sha256
+
+    if uncached:
+        # Start the longest jobs first. A SHA-256 stream cannot be split across
+        # workers, so this minimizes the end-of-run tail where only a few large
+        # files remain and the other workers would otherwise be idle.
+        uncached.sort(key=lambda candidate: candidate.size, reverse=True)
+        with ThreadPoolExecutor(
+            max_workers=report.hash_worker_threads, thread_name_prefix="muse-hash"
+        ) as executor:
+            futures = {
+                executor.submit(hash_candidate, candidate): candidate
+                for candidate in uncached
+            }
+            for future in as_completed(futures):
+                candidate = futures[future]
+                try:
+                    candidate, sha256 = future.result()
+                except OSError as error:
+                    report.errors.append(ScanError(str(candidate.path), str(error)))
+                    with progress_lock:
+                        completed_files += 1
+                        completed_bytes += candidate.size
+                        notify_hashing()
+                    continue
                 connection.execute(
                     """
                     INSERT INTO file_hashes (path, size, mtime_ns, sha256, hashed_at)
@@ -362,25 +422,17 @@ def _collect_hashes(
                         datetime.now(UTC).isoformat(),
                     ),
                 )
+                record(candidate, sha256)
                 report.hashed_files += 1
                 report.hashed_bytes += candidate.size
-                completed_files += 1
+                with progress_lock:
+                    completed_files += 1
+                    completed_bytes += candidate.size
+                    notify_hashing()
                 pending_writes += 1
-                notify_hashing()
                 if pending_writes >= 100:
                     connection.commit()
                     pending_writes = 0
-
-            hashes[candidate.path] = sha256
-            by_hash[sha256].append(
-                HashedFile(
-                    _display_path(candidate.path, target),
-                    candidate.size,
-                    sha256,
-                )
-            )
-        except OSError as error:
-            report.errors.append(ScanError(str(candidate.path), str(error)))
 
     connection.commit()
     return by_hash, hashes
@@ -493,8 +545,11 @@ def find_duplicates(
     rehash: bool = False,
     trees: bool = False,
     progress: ProgressCallback | None = None,
+    max_threads: int | None = None,
 ) -> DuplicateReport:
     """Find exact duplicates, retaining hashes in SQLite for later scans."""
+    if max_threads is not None and max_threads < 1:
+        raise ValueError("max_threads must be at least 1")
     started = perf_counter()
     targets = (
         [target.absolute()]
@@ -554,7 +609,9 @@ def find_duplicates(
         report.inventory_seconds = perf_counter() - phase_started
 
         phase_started = perf_counter()
-        by_hash, hashes = _collect_hashes(candidates, display_target, connection, report, progress)
+        by_hash, hashes = _collect_hashes(
+            candidates, display_target, connection, report, progress, max_threads
+        )
         report.hashing_seconds = perf_counter() - phase_started
 
         phase_started = perf_counter()

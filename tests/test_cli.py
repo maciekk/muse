@@ -31,6 +31,7 @@ def test_help_command_shows_command_specific_usage(capsys) -> None:
     assert "Usage: muse dupes" in output
     assert "--trees" in output
     assert "--rehash" in output
+    assert "--max-threads" in output
 
 
 def test_help_honors_explicit_color_policy(capsys) -> None:
@@ -278,6 +279,7 @@ def test_compact_apply_announces_reverification(
     output = capsys.readouterr().out
     assert result == 0
     assert "Reverifying planned trees before moving them to trash" in output
+    assert "worker thread" in output
     assert "Compaction applied" in output
     assert "removed trees moved to" in output
     assert "trash/" in output

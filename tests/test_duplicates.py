@@ -29,12 +29,16 @@ def test_find_duplicates_reports_exact_matches_and_reuses_hashes(tmp_path: Path)
         "hashing",
         "hashing",
         "hashing",
-        "hashing",
-        "hashing",
         "analysis",
         "analysis",
         "complete",
     ]
+    hashing_updates = [update for update in updates if update.phase == "hashing"]
+    assert hashing_updates[-1].completed_files == hashing_updates[-1].total_files
+    assert all(
+        update.completed_files < (update.total_files or 0)
+        for update in hashing_updates[:-1]
+    )
     assert len(first.groups) == 1
     assert first.duplicate_occurrences == 2
     assert first.redundant_occurrences == 1

@@ -54,6 +54,7 @@ muse dupes                 # find exact duplicates across the library
 muse dupes backlog         # inspect one path beneath the root
 muse dupes --rehash        # bypass the persistent hash cache
 muse dupes --trees backlog  # report maximal exact duplicate directory trees
+muse dupes backlog --max-threads 4  # limit concurrent hashing workers
 muse prune                   # discard hashes for files that no longer exist
 muse diff tree-a tree-b      # explain why two trees differ
 muse compact [backlog]        # create the sole pending compaction plan
@@ -86,7 +87,7 @@ Machine-readable JSON never contains terminal styling. Potentially slow operatio
 
 `slag/` isolates non-music artifacts moved from backlog for later triage. It retains the original backlog-relative path so provenance remains visible.
 
-Compaction reverifies every planned duplicate tree immediately before mutation, then moves redundant trees into a dated operation receipt beneath `trash/`, preserving their original repository-relative paths. These same-filesystem renames are cheap and recoverable; permanent trash purging is a separate future operation.
+Compaction reverifies every planned duplicate tree immediately before mutation, then moves redundant trees into a dated operation receipt beneath `trash/`, preserving their original repository-relative paths. Plans record each tree's filenames, file sizes, and high-resolution modification/change timestamps, so applying a current plan does not need to hash content or query the hash cache per file; older pending plans fall back to content-fingerprint verification. These same-filesystem renames are cheap and recoverable; permanent trash purging is a separate future operation.
 
 ## Design and roadmap
 
