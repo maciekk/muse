@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 DEFAULT_ROOT = Path.home() / "music-vault"
-MANAGED_AREAS = ("master", "stopgap", "incoming", "backlog", ".muse")
+MANAGED_AREAS = ("master", "stopgap", "incoming", "backlog", "slag", ".muse")
 MASTER_SHELVES = ("artists", "games", "movies-tv", "classical", "compilations", "misc")
 
 

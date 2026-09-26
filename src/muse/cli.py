@@ -61,15 +61,6 @@ class MuseHelpFormatter(RichHelpFormatter):
         yield from super()._rich_format_action(action)
 
 
-PLANNED_COMMANDS = {
-    "backlog": ("add", "scan", "status", "overlap", "unique", "browse", "verify", "compact"),
-    "integrity": ("scan", "status", "verify", "inspect", "accept"),
-    "stopgap": ("add", "status", "publish"),
-    "apple": ("status", "diff", "sync", "dupes", "report", "query"),
-    "publish": ("apple",),
-}
-
-
 def _add_json_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
 
@@ -169,12 +160,6 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     relocation.add_argument("destination", help="new path beneath the library root")
     _add_json_argument(relocation)
     relocation.set_defaults(handler=_move)
-
-    for name, actions in PLANNED_COMMANDS.items():
-        planned = commands.add_parser(name, help=f"planned {name} operations (not implemented)")
-        planned.add_argument("action", nargs="?", choices=actions)
-        planned.add_argument("arguments", nargs=argparse.REMAINDER)
-        planned.set_defaults(handler=_not_implemented)
 
     return parser
 
@@ -769,16 +754,6 @@ def _move(args: argparse.Namespace, root: Path) -> int:
             f"[dim]Preserved {human_number(result.cached_paths_updated)} cached hash paths.[/dim]"
         )
     return 0
-
-
-def _not_implemented(args: argparse.Namespace, root: Path) -> int:
-    action = f" {args.action}" if args.action else ""
-    console = make_console(args.color, stderr=True)
-    console.print(
-        f"[bold yellow]Not implemented yet:[/bold yellow] muse {args.command}{action}; "
-        "no changes were made"
-    )
-    return 2
 
 
 def _help_color(argv: Sequence[str]) -> str:

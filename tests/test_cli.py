@@ -180,10 +180,9 @@ def test_relative_stats_target_is_beneath_root(tmp_path: Path, capsys) -> None:
     assert report["target"] == str(root / "backlog")
 
 
-def test_planned_command_fails_explicitly(tmp_path: Path, capsys) -> None:
+def test_removed_command_group_is_not_accepted(tmp_path: Path, capsys) -> None:
     result = main(["--root", str(tmp_path), "backlog", "scan"])
 
     captured = capsys.readouterr()
     assert result == 2
-    assert "not implemented yet" in captured.err.lower()
-    assert "no changes were made" in captured.err
+    assert "invalid choice" in captured.err.lower()

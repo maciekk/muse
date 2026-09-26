@@ -22,6 +22,7 @@ Muse manages one isolated data root:
 ├── stopgap/
 ├── incoming/
 ├── backlog/
+├── slag/
 └── .muse/
 ```
 
@@ -55,7 +56,7 @@ muse dupes --progress always
 muse dupes --json
 ```
 
-`doctor`, `status`, and `stats` do not modify the repository or create Muse state. `dupes` never changes music files, but stores SHA-256 hashes and file size/modification-time metadata in `.muse/muse.db`; unchanged files reuse their cached hashes on later runs. Files with a size that occurs only once cannot be exact duplicates and are not hashed by the default report. `--trees` hashes every file because whole-tree equality requires complete coverage. Use `--rehash` to bypass cached hashes. Planned command groups are visible in `muse --help`, but return an explicit “not implemented” error.
+Muse uses a flat command grammar: `muse COMMAND [PATH ...] [--OPTION ...]`. Positional arguments after the command are always filesystem scopes; operations use distinct command names or dashed options. `doctor`, `status`, and `stats` do not modify the repository or create Muse state. `dupes` never changes music files, but stores SHA-256 hashes and file size/modification-time metadata in `.muse/muse.db`; unchanged files reuse their cached hashes on later runs. Files with a size that occurs only once cannot be exact duplicates and are not hashed by the default report. `--trees` hashes every file because whole-tree equality requires complete coverage. Use `--rehash` to bypass cached hashes.
 
 ## Terminal output
 
@@ -69,6 +70,8 @@ NO_COLOR=1 muse status
 ```
 
 Machine-readable JSON never contains terminal styling. Potentially slow operations delay their progress display to avoid flicker for quick work, but show it immediately when preflight identifies a large workload. Progress is written to stderr and can be controlled with `--progress auto|always|never`.
+
+`slag/` preserves non-music artifacts copied from immutable backlog snapshots for later triage. It retains the source repository and relative path so provenance remains visible.
 
 ## Installation
 
