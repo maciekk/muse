@@ -107,6 +107,29 @@ def test_dupes_reports_exact_files_and_persists_hashes(tmp_path: Path, capsys) -
     assert (root / ".muse" / "muse.db").is_file()
 
 
+def test_dupes_trees_reports_maximal_directory_copies(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    for name in ("first", "second"):
+        directory = root / "backlog" / name
+        directory.mkdir()
+        (directory / "song.flac").write_bytes(b"same")
+
+    result = main(["--root", str(root), "dupes", "backlog", "--trees", "--json"])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["tree_duplicate_groups"] == 1
+    assert report["tree_groups"][0]["directories"] == ["first", "second"]
+
+    result = main(["--root", str(root), "--color", "never", "dupes", "backlog", "--trees"])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "Maximal duplicate directory trees" in output
+    assert "Duplicate groups" not in output
+
+
 def test_dupes_shows_shared_filename_once_with_its_directories(tmp_path: Path, capsys) -> None:
     root = tmp_path / "music-vault"
     make_layout(root)

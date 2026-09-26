@@ -53,6 +53,24 @@ def test_find_duplicates_reports_exact_matches_and_reuses_hashes(tmp_path: Path)
     assert len(second.groups) == 1
 
 
+def test_find_duplicate_trees_reports_only_maximal_roots(tmp_path: Path) -> None:
+    for root in (tmp_path / "first", tmp_path / "second"):
+        (root / "album").mkdir(parents=True)
+        (root / "album" / "song.flac").write_bytes(b"audio")
+        (root / "album" / "cover.jpg").write_bytes(b"art")
+    database = tmp_path / ".muse" / "muse.db"
+
+    report = find_duplicates(tmp_path, database, trees=True)
+
+    assert report.hashed_files == 4
+    assert len(report.tree_groups) == 1
+    group = report.tree_groups[0]
+    assert group.paths == ("first", "second")
+    assert group.files == 2
+    assert group.logical_bytes == len(b"audio") + len(b"art")
+    assert group.logical_repeated_bytes == group.logical_bytes
+
+
 def test_changed_file_is_rehashed(tmp_path: Path) -> None:
     first_path = tmp_path / "first.mp3"
     second_path = tmp_path / "second.mp3"

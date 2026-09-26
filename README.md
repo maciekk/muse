@@ -46,11 +46,12 @@ muse stats --json
 muse dupes                 # find exact duplicates across the library
 muse dupes backlog         # inspect one path beneath the root
 muse dupes --rehash        # bypass the persistent hash cache
+muse dupes --trees backlog  # report maximal exact duplicate directory trees
 muse dupes --progress always
 muse dupes --json
 ```
 
-`doctor`, `status`, and `stats` do not modify the repository or create Muse state. `dupes` never changes music files, but stores SHA-256 hashes and file size/modification-time metadata in `.muse/muse.db`; unchanged files reuse their cached hashes on later runs. Files with a size that occurs only once cannot be exact duplicates and are not hashed by this command. Use `--rehash` to bypass cached hashes for duplicate candidates. Planned command groups are visible in `muse --help`, but return an explicit “not implemented” error.
+`doctor`, `status`, and `stats` do not modify the repository or create Muse state. `dupes` never changes music files, but stores SHA-256 hashes and file size/modification-time metadata in `.muse/muse.db`; unchanged files reuse their cached hashes on later runs. Files with a size that occurs only once cannot be exact duplicates and are not hashed by the default report. `--trees` hashes every file because whole-tree equality requires complete coverage. Use `--rehash` to bypass cached hashes. Planned command groups are visible in `muse --help`, but return an explicit “not implemented” error.
 
 ## Terminal output
 

@@ -129,6 +129,11 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
         help="recompute every hash instead of using unchanged cached entries",
     )
     dupes.add_argument(
+        "--trees",
+        action="store_true",
+        help="report maximal exact duplicate directory trees (hashes every file)",
+    )
+    dupes.add_argument(
         "--progress",
         choices=("auto", "always", "never"),
         default="auto",
@@ -460,6 +465,34 @@ def _duplicate_summary_rows(report: DuplicateReport) -> list[tuple[str, str]]:
     ]
 
 
+def _tree_summary_rows(report: DuplicateReport) -> list[tuple[str, str]]:
+    return [
+        ("Elapsed", human_duration(report.elapsed_seconds)),
+        ("Files examined", human_number(report.files)),
+        ("Logical size", human_bytes(report.logical_bytes)),
+        (
+            "Hash cache",
+            f"{human_number(report.hashed_files)} computed · "
+            f"{human_number(report.cached_files)} reused",
+        ),
+        (
+            "Data read",
+            f"{human_bytes(report.bytes_read)} · "
+            f"{human_bytes(round(report.hash_throughput))}/s",
+        ),
+        ("Duplicate tree groups", human_number(len(report.tree_groups))),
+        (
+            "Redundant tree copies",
+            human_number(sum(len(group.paths) - 1 for group in report.tree_groups)),
+        ),
+        (
+            "Logical repeated bytes",
+            human_bytes(sum(group.logical_repeated_bytes for group in report.tree_groups)),
+        ),
+        ("Errors", human_number(len(report.errors))),
+    ]
+
+
 def _dupes(args: argparse.Namespace, root: Path) -> int:
     target = resolve_target(root, args.target)
     progress = _DuplicateProgressDisplay(args.progress, args.color)
@@ -468,6 +501,7 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
             target,
             root / ".muse" / "muse.db",
             rehash=args.rehash,
+            trees=args.trees,
             progress=progress.update,
         )
     finally:
@@ -477,17 +511,44 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
         emit_json(report.to_dict())
     else:
         console = make_console(args.color)
-        console.print("[bold]Exact duplicate files[/bold]")
+        title = "Exact duplicate directory trees" if args.trees else "Exact duplicate files"
+        console.print(f"[bold]{title}[/bold]")
         console.print("[dim]Target[/dim]", str(target))
         console.print("[dim]Hash cache[/dim]", report.database, "\n")
         print_table(
             console,
             ("METRIC", "VALUE"),
-            _duplicate_summary_rows(report),
+            _tree_summary_rows(report) if args.trees else _duplicate_summary_rows(report),
             right_aligned=frozenset({"VALUE"}),
         )
 
-        if report.groups:
+        if args.trees and report.tree_groups:
+            console.print("[bold]Maximal duplicate directory trees[/bold]")
+            terminal_output = sys.stdout.isatty()
+            path_width = max(24, console.width - 60)
+            rows = [
+                (
+                    group.sha256[:12],
+                    human_number(len(group.paths)),
+                    human_number(group.files),
+                    human_bytes(group.logical_bytes),
+                    human_bytes(group.logical_repeated_bytes),
+                    "\n".join(
+                        middle_truncate(path, path_width) if terminal_output else path
+                        for path in group.paths
+                    ),
+                )
+                for group in report.tree_groups
+            ]
+            print_table(
+                console,
+                ("TREE", "COPIES", "FILES", "EACH", "REPEATED", "DIRECTORIES"),
+                rows,
+                right_aligned=frozenset({"COPIES", "FILES", "EACH", "REPEATED"}),
+                column_widths={"DIRECTORIES": path_width} if terminal_output else None,
+            )
+
+        if report.groups and not args.trees:
             console.print("[bold]Duplicate groups[/bold]")
             terminal_output = sys.stdout.isatty()
             path_width = max(24, console.width - 48)

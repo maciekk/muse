@@ -48,6 +48,29 @@ class HashedFile:
 
 
 @dataclass(frozen=True)
+class TreeDuplicateGroup:
+    sha256: str
+    files: int
+    logical_bytes: int
+    paths: tuple[str, ...]
+
+    @property
+    def logical_repeated_bytes(self) -> int:
+        return self.logical_bytes * (len(self.paths) - 1)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sha256": self.sha256,
+            "files_per_copy": self.files,
+            "logical_bytes_per_copy": self.logical_bytes,
+            "occurrences": len(self.paths),
+            "redundant_occurrences": len(self.paths) - 1,
+            "logical_repeated_bytes": self.logical_repeated_bytes,
+            "directories": list(self.paths),
+        }
+
+
+@dataclass(frozen=True)
 class DuplicateGroup:
     sha256: str
     size: int
@@ -86,6 +109,7 @@ class DuplicateReport:
     analysis_seconds: float = 0.0
     elapsed_seconds: float = 0.0
     groups: list[DuplicateGroup] = field(default_factory=list)
+    tree_groups: list[TreeDuplicateGroup] = field(default_factory=list)
     errors: list[ScanError] = field(default_factory=list)
 
     @property
@@ -141,6 +165,8 @@ class DuplicateReport:
             "redundant_occurrences": self.redundant_occurrences,
             "logical_repeated_bytes": self.logical_repeated_bytes,
             "groups": [group.to_dict() for group in self.groups],
+            "tree_duplicate_groups": len(self.tree_groups),
+            "tree_groups": [group.to_dict() for group in self.tree_groups],
             "errors": [error.to_dict() for error in self.errors],
         }
 
@@ -270,8 +296,9 @@ def _collect_hashes(
     connection: sqlite3.Connection,
     report: DuplicateReport,
     progress: ProgressCallback | None,
-) -> dict[str, list[HashedFile]]:
+) -> tuple[dict[str, list[HashedFile]], dict[Path, str]]:
     by_hash: dict[str, list[HashedFile]] = defaultdict(list)
+    hashes: dict[Path, str] = {}
     uncached_files = sum(candidate.cached_sha256 is None for candidate in candidates)
     uncached_bytes = sum(
         candidate.size for candidate in candidates if candidate.cached_sha256 is None
@@ -344,6 +371,7 @@ def _collect_hashes(
                     connection.commit()
                     pending_writes = 0
 
+            hashes[candidate.path] = sha256
             by_hash[sha256].append(
                 HashedFile(
                     _display_path(candidate.path, target),
@@ -355,7 +383,84 @@ def _collect_hashes(
             report.errors.append(ScanError(str(candidate.path), str(error)))
 
     connection.commit()
-    return by_hash
+    return by_hash, hashes
+
+
+def _directory_paths(target: Path, excluded: Path, errors: list[ScanError]) -> list[Path]:
+    directories = []
+    pending = [target]
+    while pending:
+        directory = pending.pop()
+        directories.append(directory)
+        try:
+            with os.scandir(directory) as entries:
+                children = sorted(entries, key=lambda entry: entry.name, reverse=True)
+        except OSError as error:
+            errors.append(ScanError(str(directory), str(error)))
+            continue
+        for entry in children:
+            path = Path(entry.path)
+            try:
+                if path != excluded and not entry.is_symlink() and entry.is_dir(
+                    follow_symlinks=False
+                ):
+                    pending.append(path)
+            except OSError as error:
+                errors.append(ScanError(str(path), str(error)))
+    return directories
+
+
+def _analyze_trees(
+    target: Path,
+    directories: list[Path],
+    hashes: dict[Path, str],
+    report: DuplicateReport,
+) -> None:
+    children: dict[Path, list[tuple[str, str, str]]] = defaultdict(list)
+    counts: dict[Path, tuple[int, int]] = {}
+    for path, sha256 in hashes.items():
+        children[path.parent].append((path.name, "file", sha256))
+    digests: dict[Path, str] = {}
+    for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
+        digest = hashlib.sha256()
+        files = 0
+        logical_bytes = 0
+        for name, kind, value in sorted(children[directory]):
+            digest.update(f"{kind}\0{name}\0{value}\n".encode())
+            if kind == "file":
+                files += 1
+                logical_bytes += (directory / name).stat(follow_symlinks=False).st_size
+            else:
+                child_files, child_bytes = counts[directory / name]
+                files += child_files
+                logical_bytes += child_bytes
+        digests[directory] = digest.hexdigest()
+        counts[directory] = (files, logical_bytes)
+        if directory != target:
+            children[directory.parent].append((directory.name, "directory", digests[directory]))
+
+    by_digest: dict[str, list[Path]] = defaultdict(list)
+    for directory, digest in digests.items():
+        if directory != target:
+            by_digest[digest].append(directory)
+    duplicate_directories = {
+        directory for paths in by_digest.values() if len(paths) > 1 for directory in paths
+    }
+    for digest, paths in by_digest.items():
+        paths = [path for path in paths if path.parent not in duplicate_directories]
+        if len(paths) < 2:
+            continue
+        paths.sort()
+        files, logical_bytes = counts[paths[0]]
+        report.tree_groups.append(
+            TreeDuplicateGroup(
+                digest,
+                files,
+                logical_bytes,
+                tuple(_display_path(path, target) for path in paths),
+            )
+        )
+    report.tree_groups.sort(key=lambda group: (-group.logical_repeated_bytes, group.sha256))
 
 
 def _analyze(
@@ -386,6 +491,7 @@ def find_duplicates(
     database: Path,
     *,
     rehash: bool = False,
+    trees: bool = False,
     progress: ProgressCallback | None = None,
 ) -> DuplicateReport:
     """Find exact duplicates, retaining hashes in SQLite for later scans."""
@@ -426,7 +532,9 @@ def find_duplicates(
             progress,
         )
         size_counts = Counter(candidate.size for candidate in inventory)
-        candidates = [candidate for candidate in inventory if size_counts[candidate.size] > 1]
+        candidates = inventory if trees else [
+            candidate for candidate in inventory if size_counts[candidate.size] > 1
+        ]
         report.hash_candidate_files = len(candidates)
         report.hash_candidate_bytes = sum(candidate.size for candidate in candidates)
         report.cached_files = sum(
@@ -438,11 +546,15 @@ def find_duplicates(
         report.inventory_seconds = perf_counter() - phase_started
 
         phase_started = perf_counter()
-        by_hash = _collect_hashes(candidates, target, connection, report, progress)
+        by_hash, hashes = _collect_hashes(candidates, target, connection, report, progress)
         report.hashing_seconds = perf_counter() - phase_started
 
         phase_started = perf_counter()
         _analyze(by_hash, report, progress)
+        if trees:
+            directories = _directory_paths(target, database.parent, report.errors)
+            if not report.errors:
+                _analyze_trees(target, directories, hashes, report)
         report.analysis_seconds = perf_counter() - phase_started
     finally:
         connection.close()
