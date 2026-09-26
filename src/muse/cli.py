@@ -166,7 +166,12 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     relocation.set_defaults(handler=_move)
 
     slag = commands.add_parser("slag", help="inspect or move non-audio backlog artifacts")
-    slag.add_argument("--from", dest="sources", action="append", default=[], metavar="PATH")
+    slag.add_argument(
+        "sources",
+        nargs="*",
+        metavar="PATH",
+        help="backlog files or directories to move into slag",
+    )
     slag.add_argument("--long", action="store_true", help="include size and file type")
     slag.add_argument("--all", action="store_true", help="list every selected file")
     slag.add_argument("--dirs", action="store_true", help="list directories only")
@@ -759,24 +764,61 @@ def _slag(args: argparse.Namespace, root: Path) -> int:
         result = slag_stats(root)
         copies = slag_inventory(root)
         if args.json:
-            emit_json(result.to_dict())
+            payload = result.to_dict()
+            payload["entries"] = [
+                {"path": str(item.source.relative_to(root / "slag")), "size": item.size}
+                for item in copies
+            ]
+            emit_json(payload)
         else:
             console = make_console(args.color)
             console.print("[bold]Slag inventory[/bold]")
-            rows = [
-                (
-                    str(item.source.relative_to(root / "slag")),
-                    human_bytes(item.size),
-                    item.source.suffix.lower() or "[no extension]",
+            grouped: dict[Path, list[Any]] = {}
+            for item in copies:
+                grouped.setdefault(item.source.parent, []).append(item)
+            if args.dirs:
+                rows = [
+                    (
+                        str(directory.relative_to(root / "slag")),
+                        human_number(len(items)),
+                        human_bytes(sum(item.size for item in items)),
+                    )
+                    for directory, items in grouped.items()
+                ]
+                print_table(
+                    console,
+                    ("DIRECTORY", "FILES", "SIZE"),
+                    rows,
+                    right_aligned=frozenset({"FILES", "SIZE"}),
                 )
-                for item in copies
-            ]
-            print_table(
-                console,
-                ("PATH", "SIZE", "TYPE") if args.long else ("PATH",),
-                rows if args.long else [(row[0],) for row in rows],
-                right_aligned=frozenset({"SIZE"}),
-            )
+            elif args.all:
+                rows = [
+                    (
+                        str(item.source.relative_to(root / "slag")),
+                        human_bytes(item.size),
+                        item.source.suffix.lower() or "[no extension]",
+                    )
+                    for item in copies
+                ]
+                print_table(
+                    console,
+                    ("PATH", "SIZE", "TYPE") if args.long else ("PATH",),
+                    rows if args.long else [(row[0],) for row in rows],
+                    right_aligned=frozenset({"SIZE"}),
+                )
+            else:
+                for directory, items in grouped.items():
+                    relative = directory.relative_to(root / "slag")
+                    console.print(
+                        f"[bold]{relative}/[/bold] [dim]{len(items)} files · "
+                        f"{human_bytes(sum(item.size for item in items))}[/dim]"
+                    )
+                    for item in items[:10]:
+                        detail = f" [dim]{human_bytes(item.size)}[/dim]" if args.long else ""
+                        console.print(f"        {item.source.name}{detail}")
+                    if len(items) > 10:
+                        console.print(f"        [dim]… {len(items) - 10} more files[/dim]")
+                    console.print()
             print_table(
                 console,
                 ("METRIC", "VALUE"),
@@ -854,9 +896,10 @@ def _slag(args: argparse.Namespace, root: Path) -> int:
                 )
                 for item in items[:10]:
                     detail = f" [dim]{human_bytes(item.size)}[/dim]" if args.long else ""
-                    console.print(f"  {item.destination.name}{detail}")
+                    console.print(f"        {item.destination.name}{detail}")
                 if len(items) > 10:
-                    console.print(f"  [dim]… {len(items) - 10} more files[/dim]")
+                    console.print(f"        [dim]… {len(items) - 10} more files[/dim]")
+                console.print()
         print_table(
             console,
             ("METRIC", "VALUE"),

@@ -53,8 +53,8 @@ muse compact [backlog]        # create the sole pending compaction plan
 muse compact --apply          # reverify, confirm, then apply that plan
 muse mv old-path new-path     # move or rename content; preserve cached hashes
 muse slag                      # inspect preserved non-music artifacts
-muse slag --from backlog/pc-2007 --apply
-muse slag --from backlog/pc-2007 --thorough  # include artwork and release-adjacent files
+muse slag backlog/pc-2007 --apply
+muse slag backlog/pc-2007 --thorough  # include artwork and release-adjacent files
 muse dupes --progress always
 muse dupes --json
 ```
