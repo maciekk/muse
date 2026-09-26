@@ -21,6 +21,7 @@ from rich.progress import (
     TextColumn,
     TimeRemainingColumn,
 )
+from rich.text import Text
 from rich_argparse import RichHelpFormatter
 
 from muse import __version__
@@ -593,16 +594,31 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
             terminal_output = sys.stdout.isatty()
             path_width = max(24, console.width - 48)
 
-            def file_and_paths(group: DuplicateGroup) -> list[str]:
+            def file_and_paths(group: DuplicateGroup) -> Text:
                 file_paths = [Path(path) for path in group.paths]
                 filenames = {path.name for path in file_paths}
                 if len(filenames) != 1:
-                    paths = list(group.paths)
-                else:
-                    paths = [file_paths[0].name, *(str(path.parent) for path in file_paths)]
+                    lines = Text()
+                    for index, path in enumerate(file_paths):
+                        filename = path.name
+                        directory = f"{path.parent}/"
+                        if terminal_output:
+                            filename = middle_truncate(filename, path_width)
+                            directory = middle_truncate(directory, path_width)
+                        if index:
+                            lines.append("\n")
+                        lines.append(filename, style="bold cyan")
+                        lines.append("\n" + directory, style="dim")
+                    return lines
+                filename = file_paths[0].name
+                directories = [f"{path.parent}/" for path in file_paths]
                 if terminal_output:
-                    return [middle_truncate(path, path_width) for path in paths]
-                return paths
+                    filename = middle_truncate(filename, path_width)
+                    directories = [middle_truncate(path, path_width) for path in directories]
+                return Text.assemble(
+                    (filename, "bold cyan"),
+                    ("\n" + "\n".join(directories), "dim"),
+                )
 
             rows = [
                 (
@@ -610,7 +626,7 @@ def _dupes(args: argparse.Namespace, root: Path) -> int:
                     human_number(len(group.paths)),
                     human_bytes(group.size),
                     human_bytes(group.logical_repeated_bytes),
-                    "\n".join(file_and_paths(group)),
+                    file_and_paths(group),
                 )
                 for group in report.groups
             ]
