@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from muse.filesystem import Entry, WalkError, walk
+
 AUDIO_EXTENSIONS = frozenset(
     {
         ".aac",
@@ -116,48 +118,18 @@ def scan_path(path: Path) -> PathStats:
     """Recursively inspect *path* without following symlinks or writing state."""
     stats = PathStats()
 
-    try:
-        if path.is_symlink():
-            stats.symlinks = 1
-            return stats
-        if path.is_file():
-            _record_file(stats, path, path.stat(follow_symlinks=False))
-            return stats
-        if not path.exists():
-            stats.errors.append(ScanError(str(path), "path does not exist"))
-            return stats
-        if not path.is_dir():
-            stats.other_entries = 1
-            return stats
-    except OSError as error:
-        stats.errors.append(ScanError(str(path), str(error)))
-        return stats
-
-    pending = [path]
-    while pending:
-        directory = pending.pop()
-        try:
-            with os.scandir(directory) as entries:
-                for entry in entries:
-                    entry_path = Path(entry.path)
-                    try:
-                        if entry.is_symlink():
-                            stats.symlinks += 1
-                        elif entry.is_dir(follow_symlinks=False):
-                            stats.directories += 1
-                            pending.append(entry_path)
-                        elif entry.is_file(follow_symlinks=False):
-                            _record_file(
-                                stats,
-                                entry_path,
-                                entry.stat(follow_symlinks=False),
-                            )
-                        else:
-                            stats.other_entries += 1
-                    except OSError as error:
-                        stats.errors.append(ScanError(str(entry_path), str(error)))
-        except OSError as error:
-            stats.errors.append(ScanError(str(directory), str(error)))
+    for item in walk(path):
+        if isinstance(item, WalkError):
+            stats.errors.append(ScanError(str(item.path), item.message))
+        elif item.kind == "symlink":
+            stats.symlinks += 1
+        elif item.kind == "directory":
+            stats.directories += item.path != path
+        elif item.kind == "file":
+            assert isinstance(item, Entry) and item.stat is not None
+            _record_file(stats, item.path, item.stat)
+        else:
+            stats.other_entries += 1
 
     return stats
 

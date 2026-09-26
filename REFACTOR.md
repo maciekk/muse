@@ -339,4 +339,11 @@ the scan's operational-state writes.
 Baseline: 91 tests passed and Ruff lint passed. Phase 1 checks: full test suite,
 Ruff lint, and `muse --help` passed. The changed Python files pass Ruff formatting;
 repository-wide formatting has preexisting failures outside this phase. Phase 2
-has not started.
+is complete. `filesystem.py` now streams entry kinds, regular-file stats, and
+traversal errors without following descendant directory links; callers retain
+their own exclusions, sorting, and treatment of symlinks and special entries.
+`trees.py` owns the recursive digest encoding and per-directory totals used by
+duplicate discovery and tree verification. Incomplete tree inventories now
+report errors and yield no fingerprint for destructive verification. The
+selected symlinked root remains supported. Phase 2 checks: 101 tests passed,
+Ruff lint and CLI help passed. Phase 3 has not started.

@@ -16,6 +16,7 @@ from typing import Any
 
 from muse import cache
 from muse.config import CONTENT_AREAS
+from muse.filesystem import WalkError, walk
 from muse.hashing import FileIdentity, sha256_file
 from muse.repository import AUDIO_EXTENSIONS, ScanError
 
@@ -171,52 +172,27 @@ def _inventory(
 ) -> list[ScannedFile]:
     files: list[ScannedFile] = []
     scanned_bytes = 0
-    try:
-        if target.is_symlink():
-            errors.append(ScanError(str(target), "target must not be a symlink"))
-            return files
-        if target.is_file():
-            identity = FileIdentity.from_path(target)
-            if progress:
-                progress(ScanProgress(1, identity.size))
-            return [ScannedFile(target, target.name, identity.size, identity)]
-        if not target.exists():
-            errors.append(ScanError(str(target), "path does not exist"))
-            return files
-        if not target.is_dir():
-            errors.append(ScanError(str(target), "path is not a regular file or directory"))
-            return files
-    except OSError as error:
-        errors.append(ScanError(str(target), str(error)))
-        return files
-
-    pending = [target]
-    while pending:
-        directory = pending.pop()
-        try:
-            with os.scandir(directory) as entries:
-                children = sorted(entries, key=lambda entry: entry.name, reverse=True)
-        except OSError as error:
-            errors.append(ScanError(str(directory), str(error)))
+    for item in walk(target, sort=True):
+        if isinstance(item, WalkError):
+            errors.append(ScanError(str(item.path), item.message))
             continue
-        for entry in children:
-            path = Path(entry.path)
+        if item.path == target and item.kind == "symlink":
+            errors.append(ScanError(str(target), "target must not be a symlink"))
+        elif item.path == target and item.kind == "other":
+            errors.append(ScanError(str(target), "path is not a regular file or directory"))
+        elif item.kind == "file":
             try:
-                if entry.is_symlink():
-                    continue
-                if entry.is_dir(follow_symlinks=False):
-                    pending.append(path)
-                elif entry.is_file(follow_symlinks=False):
-                    identity = FileIdentity.from_path(path)
-                    item = ScannedFile(
-                        path, str(path.relative_to(label_root)), identity.size, identity
-                    )
-                    files.append(item)
-                    scanned_bytes += item.size
-                    if progress:
-                        progress(ScanProgress(len(files), scanned_bytes))
+                identity = FileIdentity.from_path(item.path)
+                relative = (
+                    target.name if item.path == target else str(item.path.relative_to(label_root))
+                )
+                scanned = ScannedFile(item.path, relative, identity.size, identity)
+                files.append(scanned)
+                scanned_bytes += scanned.size
+                if progress:
+                    progress(ScanProgress(len(files), scanned_bytes))
             except OSError as error:
-                errors.append(ScanError(str(path), str(error)))
+                errors.append(ScanError(str(item.path), str(error)))
     files.sort(key=lambda item: item.relative.casefold())
     return files
 
@@ -225,18 +201,14 @@ def _pull_totals(sources: list[Path]) -> tuple[int, int]:
     """Count regular files to provide determinate copy progress."""
     files = 0
     logical_bytes = 0
-    pending = list(sources)
-    while pending:
-        directory = pending.pop()
-        with os.scandir(directory) as entries:
-            for entry in entries:
-                if entry.is_symlink():
-                    continue
-                if entry.is_dir(follow_symlinks=False):
-                    pending.append(Path(entry.path))
-                elif entry.is_file(follow_symlinks=False):
-                    files += 1
-                    logical_bytes += entry.stat(follow_symlinks=False).st_size
+    for source in sources:
+        for item in walk(source):
+            if isinstance(item, WalkError):
+                raise OSError(f"{item.path}: {item.message}")
+            if item.kind == "file":
+                assert item.stat is not None
+                files += 1
+                logical_bytes += item.stat.st_size
     return files, logical_bytes
 
 

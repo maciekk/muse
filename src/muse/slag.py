@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from muse.filesystem import WalkError, walk
 from muse.hashing import sha256_file
 from muse.repository import AUDIO_EXTENSIONS, scan_path
 
@@ -54,10 +55,12 @@ def candidates(root: Path, sources: list[Path], *, thorough: bool = False) -> li
             source.relative_to(backlog)
         except ValueError as error:
             raise ValueError("--from paths must be beneath backlog/") from error
-        paths = (
-            [source]
-            if source.is_file()
-            else sorted(path for path in source.rglob("*") if path.is_file())
+        entries = list(walk(source))
+        for item in entries:
+            if isinstance(item, WalkError):
+                raise OSError(f"{item.path}: {item.message}")
+        paths = sorted(
+            item.path for item in entries if not isinstance(item, WalkError) and item.kind == "file"
         )
         for path in paths:
             if path.is_symlink() or path.suffix.lower() in AUDIO_EXTENSIONS:
@@ -102,10 +105,17 @@ def inventory(root: Path) -> list[SlagCopy]:
     slag = root / "slag"
     if not slag.exists():
         return []
+    entries = list(walk(slag))
+    for item in entries:
+        if isinstance(item, WalkError):
+            raise OSError(f"{item.path}: {item.message}")
     return [
-        SlagCopy(path, path, path.stat().st_size)
-        for path in sorted(slag.rglob("*"))
-        if path.is_file() and not path.is_symlink()
+        SlagCopy(item.path, item.path, item.stat.st_size)
+        for item in sorted(
+            (item for item in entries if not isinstance(item, WalkError) and item.kind == "file"),
+            key=lambda item: item.path,
+        )
+        if item.stat is not None
     ]
 
 

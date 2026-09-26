@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import sqlite3
 from collections import Counter, defaultdict
@@ -15,8 +14,10 @@ from time import perf_counter
 from typing import Any
 
 from muse import cache
+from muse.filesystem import WalkError, walk
 from muse.hashing import FileIdentity, sha256_file
 from muse.repository import ScanError
+from muse.trees import fingerprints
 
 
 @dataclass(frozen=True)
@@ -181,31 +182,11 @@ class DuplicateReport:
 
 
 def _iter_files(target: Path, excluded: Path, errors: list[ScanError]) -> Iterator[Path]:
-    if target.is_file():
-        yield target
-        return
-
-    pending = [target]
-    while pending:
-        directory = pending.pop()
-        try:
-            with os.scandir(directory) as entries:
-                children = sorted(entries, key=lambda entry: entry.name, reverse=True)
-        except OSError as error:
-            errors.append(ScanError(str(directory), str(error)))
-            continue
-
-        for entry in children:
-            path = Path(entry.path)
-            try:
-                if path == excluded or entry.is_symlink():
-                    continue
-                if entry.is_dir(follow_symlinks=False):
-                    pending.append(path)
-                elif entry.is_file(follow_symlinks=False):
-                    yield path
-            except OSError as error:
-                errors.append(ScanError(str(path), str(error)))
+    for item in walk(target, exclude=lambda path: path == excluded, sort=True, follow_root=True):
+        if isinstance(item, WalkError):
+            errors.append(ScanError(str(item.path), item.message))
+        elif item.kind == "file":
+            yield item.path
 
 
 def _display_path(path: Path, target: Path) -> str:
@@ -380,27 +361,11 @@ def _collect_hashes(
 
 def _directory_paths(target: Path, excluded: Path, errors: list[ScanError]) -> list[Path]:
     directories = []
-    pending = [target]
-    while pending:
-        directory = pending.pop()
-        directories.append(directory)
-        try:
-            with os.scandir(directory) as entries:
-                children = sorted(entries, key=lambda entry: entry.name, reverse=True)
-        except OSError as error:
-            errors.append(ScanError(str(directory), str(error)))
-            continue
-        for entry in children:
-            path = Path(entry.path)
-            try:
-                if (
-                    path != excluded
-                    and not entry.is_symlink()
-                    and entry.is_dir(follow_symlinks=False)
-                ):
-                    pending.append(path)
-            except OSError as error:
-                errors.append(ScanError(str(path), str(error)))
+    for item in walk(target, exclude=lambda path: path == excluded, sort=True, follow_root=True):
+        if isinstance(item, WalkError):
+            errors.append(ScanError(str(item.path), item.message))
+        elif item.kind == "directory":
+            directories.append(item.path)
     return directories
 
 
@@ -408,35 +373,18 @@ def _analyze_trees(
     target: Path,
     directories: list[Path],
     hashes: dict[Path, str],
+    sizes: dict[Path, int],
     report: DuplicateReport,
 ) -> None:
-    children: dict[Path, list[tuple[str, str, str]]] = defaultdict(list)
-    counts: dict[Path, tuple[int, int]] = {}
-    for path, sha256 in hashes.items():
-        children[path.parent].append((path.name, "file", sha256))
-    digests: dict[Path, str] = {}
-    for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
-        digest = hashlib.sha256()
-        files = 0
-        logical_bytes = 0
-        for name, kind, value in sorted(children[directory]):
-            digest.update(f"{kind}\0{name}\0{value}\n".encode())
-            if kind == "file":
-                files += 1
-                logical_bytes += (directory / name).stat(follow_symlinks=False).st_size
-            else:
-                child_files, child_bytes = counts[directory / name]
-                files += child_files
-                logical_bytes += child_bytes
-        digests[directory] = digest.hexdigest()
-        counts[directory] = (files, logical_bytes)
-        if directory != target:
-            children[directory.parent].append((directory.name, "directory", digests[directory]))
+    results = fingerprints(
+        {str(path.relative_to(target)) for path in directories},
+        {str(path.relative_to(target)): (sha256, sizes[path]) for path, sha256 in hashes.items()},
+    )
 
     by_digest: dict[str, list[Path]] = defaultdict(list)
-    for directory, digest in digests.items():
-        if directory != target:
-            by_digest[digest].append(directory)
+    for relative, result in results.items():
+        if relative != ".":
+            by_digest[result.sha256].append(target / relative)
     duplicate_directories = {
         directory for paths in by_digest.values() if len(paths) > 1 for directory in paths
     }
@@ -445,7 +393,8 @@ def _analyze_trees(
         if len(paths) < 2:
             continue
         paths.sort()
-        files, logical_bytes = counts[paths[0]]
+        result = results[str(paths[0].relative_to(target))]
+        files, logical_bytes = result.files, result.logical_bytes
         # Empty files still participate in structural fingerprints for mixed
         # trees, but an all-zero-byte tree is not a useful duplicate group.
         if logical_bytes == 0:
@@ -565,7 +514,13 @@ def find_duplicates(
         if trees:
             directories = _directory_paths(display_target, database.parent, report.errors)
             if not report.errors:
-                _analyze_trees(display_target, directories, hashes, report)
+                _analyze_trees(
+                    display_target,
+                    directories,
+                    hashes,
+                    {candidate.path: candidate.size for candidate in candidates},
+                    report,
+                )
         report.analysis_seconds = perf_counter() - phase_started
     finally:
         connection.close()

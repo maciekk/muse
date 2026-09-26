@@ -149,13 +149,13 @@ def test_compaction_reverifies_a_shared_retained_tree_only_once(
     save_plan(root, operations)
 
     scans: list[Path] = []
-    original_walk = muse.tree_diff.os.walk
+    original_walk = muse.tree_diff.walk
 
     def recording_walk(path, *args, **kwargs):
         scans.append(Path(path))
         yield from original_walk(path, *args, **kwargs)
 
-    monkeypatch.setattr(muse.tree_diff.os, "walk", recording_walk)
+    monkeypatch.setattr(muse.tree_diff, "walk", recording_walk)
     monkeypatch.setattr(
         "muse.compaction.fingerprint_trees",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(

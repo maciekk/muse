@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from muse.config import CONTENT_AREAS
+from muse.filesystem import WalkError, walk
 
 
 @dataclass(frozen=True)
@@ -42,38 +42,22 @@ def search_vault(root: Path, terms: list[str]) -> tuple[list[SearchMatch], list[
     if not root.is_dir():
         return [], [SearchError(str(root), "library root does not exist or is not a directory")]
 
-    pending = [root / area for area in CONTENT_AREAS if (root / area).is_dir()]
-    while pending:
-        directory = pending.pop()
-        try:
-            with os.scandir(directory) as entries:
-                for entry in entries:
-                    path = Path(entry.path)
-                    try:
-                        is_symlink = entry.is_symlink()
-                        is_directory = entry.is_dir(follow_symlinks=False)
-                        if is_directory:
-                            pending.append(path)
-
-                        relative_path = path.relative_to(root).as_posix()
-                        name = entry.name.casefold()
-                        if not all(term in name for term in included_terms) or any(
-                            term in relative_path.casefold() for term in excluded_terms
-                        ):
-                            continue
-                        if is_symlink:
-                            kind = "symlink"
-                        elif is_directory:
-                            kind = "directory"
-                        elif entry.is_file(follow_symlinks=False):
-                            kind = "file"
-                        else:
-                            kind = "other"
-                        matches.append(SearchMatch(relative_path, kind))
-                    except OSError as error:
-                        errors.append(SearchError(str(path), str(error)))
-        except OSError as error:
-            errors.append(SearchError(str(directory), str(error)))
+    for area in CONTENT_AREAS:
+        area_path = root / area
+        if not area_path.is_dir():
+            continue
+        for item in walk(area_path):
+            if isinstance(item, WalkError):
+                errors.append(SearchError(str(item.path), item.message))
+                continue
+            if item.path == area_path:
+                continue
+            relative_path = item.path.relative_to(root).as_posix()
+            name = item.path.name.casefold()
+            if all(term in name for term in included_terms) and not any(
+                term in relative_path.casefold() for term in excluded_terms
+            ):
+                matches.append(SearchMatch(relative_path, item.kind))
 
     matches.sort(key=lambda match: (match.path.casefold(), match.path))
     errors.sort(key=lambda error: error.path)

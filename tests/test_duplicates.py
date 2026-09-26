@@ -74,6 +74,25 @@ def test_find_duplicates_ignores_zero_byte_files(tmp_path: Path) -> None:
     assert tree_report.tree_groups == []
 
 
+def test_single_file_and_database_directory_exclusion(tmp_path: Path) -> None:
+    song = tmp_path / "song.flac"
+    song.write_bytes(b"audio")
+    state = tmp_path / ".muse"
+    state.mkdir()
+    (state / "copy.flac").write_bytes(b"audio")
+    database = state / "muse.db"
+
+    single = find_duplicates(song, database)
+    whole = find_duplicates(tmp_path, database)
+
+    assert single.files == 1
+    assert single.groups == []
+    assert single.errors == []
+    assert whole.files == 1
+    assert whole.groups == []
+    assert whole.errors == []
+
+
 def test_find_duplicate_trees_reports_only_maximal_roots(tmp_path: Path) -> None:
     for root in (tmp_path / "first", tmp_path / "second"):
         (root / "album").mkdir(parents=True)

@@ -12,8 +12,10 @@ from time import perf_counter
 from typing import Any
 
 from muse import cache
+from muse.filesystem import WalkError, walk
 from muse.hashing import FileIdentity, sha256_file
 from muse.repository import ScanError
+from muse.trees import TreeFingerprint, fingerprints
 
 
 @dataclass(frozen=True)
@@ -25,13 +27,6 @@ class TreeDifference:
 
     def to_dict(self) -> dict[str, str | None]:
         return {"kind": self.kind, "path": self.path, "left": self.left, "right": self.right}
-
-
-@dataclass(frozen=True)
-class TreeFingerprint:
-    sha256: str
-    files: int
-    logical_bytes: int
 
 
 @dataclass
@@ -71,18 +66,15 @@ def _snapshot(
     directories = {"."}
     files: dict[str, tuple[str, int]] = {}
     pending_writes = 0
-    for directory, child_directories, child_files in os.walk(root, followlinks=False):
-        current = Path(directory)
-        child_directories[:] = [
-            child for child in child_directories if current / child != database_parent
-        ]
-        for child in child_directories:
-            directories.add(str((current / child).relative_to(root)))
-        for child in child_files:
-            path = current / child
+    for item in walk(root, exclude=lambda path: path == database_parent, follow_root=True):
+        if isinstance(item, WalkError):
+            report.errors.append(ScanError(str(item.path), item.message))
+            continue
+        path = item.path
+        if item.kind == "directory":
+            directories.add(str(path.relative_to(root)))
+        elif item.kind == "file":
             try:
-                if path.is_symlink():
-                    continue
                 identity = FileIdentity.from_path(path)
                 sha256 = cache.lookup(connection, path, identity)
                 if sha256 is None:
@@ -106,37 +98,7 @@ def _snapshot(
 
 def _fingerprint(directories: set[str], files: dict[str, tuple[str, int]]) -> TreeFingerprint:
     """Produce the same recursive digest used by duplicate-tree planning."""
-    children: dict[Path, list[tuple[str, str, str]]] = {
-        Path(directory): [] for directory in directories
-    }
-    counts: dict[Path, tuple[int, int]] = {}
-    for relative, (sha256, _size) in files.items():
-        path = Path(relative)
-        children.setdefault(path.parent, []).append((path.name, "file", sha256))
-
-    digests: dict[Path, str] = {}
-    for directory in sorted(children, key=lambda path: len(path.parts), reverse=True):
-        digest = hashlib.sha256()
-        file_count = 0
-        logical_bytes = 0
-        for name, kind, value in sorted(children[directory]):
-            digest.update(f"{kind}\0{name}\0{value}\n".encode())
-            if kind == "file":
-                file_count += 1
-                logical_bytes += files[str(directory / name)][1]
-            else:
-                child_count, child_bytes = counts[directory / name]
-                file_count += child_count
-                logical_bytes += child_bytes
-        digests[directory] = digest.hexdigest()
-        counts[directory] = (file_count, logical_bytes)
-        if directory != Path("."):
-            children.setdefault(directory.parent, []).append(
-                (directory.name, "directory", digests[directory])
-            )
-
-    file_count, logical_bytes = counts[Path(".")]
-    return TreeFingerprint(digests[Path(".")], file_count, logical_bytes)
+    return fingerprints(directories, files)["."]
 
 
 def _metadata_fingerprint(root: Path) -> tuple[TreeFingerprint | None, list[ScanError]]:
@@ -146,24 +108,17 @@ def _metadata_fingerprint(root: Path) -> tuple[TreeFingerprint | None, list[Scan
     directories = {"."}
     files: dict[str, tuple[str, int]] = {}
 
-    def walk_error(error: OSError) -> None:
-        errors.append(ScanError(str(error.filename or root), str(error)))
-
-    for directory, child_directories, child_files in os.walk(
-        root, followlinks=False, onerror=walk_error
-    ):
-        current = Path(directory)
-        child_directories[:] = [
-            child for child in child_directories if not (current / child).is_symlink()
-        ]
-        for child in child_directories:
-            directories.add(str((current / child).relative_to(root)))
-        for child in child_files:
-            path = current / child
+    for item in walk(root, follow_root=True):
+        if isinstance(item, WalkError):
+            errors.append(ScanError(str(item.path), item.message))
+            continue
+        path = item.path
+        if item.kind == "directory":
+            directories.add(str(path.relative_to(root)))
+        elif item.kind == "file":
             try:
-                if path.is_symlink():
-                    continue
-                stat_result = path.stat(follow_symlinks=False)
+                stat_result = item.stat
+                assert stat_result is not None
                 identity = hashlib.sha256(
                     f"{stat_result.st_size}\0{stat_result.st_mtime_ns}\0"
                     f"{stat_result.st_ctime_ns}".encode()
@@ -171,7 +126,7 @@ def _metadata_fingerprint(root: Path) -> tuple[TreeFingerprint | None, list[Scan
                 files[str(path.relative_to(root))] = (identity, stat_result.st_size)
             except OSError as error:
                 errors.append(ScanError(str(path), str(error)))
-    return _fingerprint(directories, files), errors
+    return (_fingerprint(directories, files) if not errors else None), errors
 
 
 def fingerprint_metadata_trees(
@@ -210,8 +165,10 @@ def fingerprint_trees(
             if not path.is_dir():
                 report.errors.append(ScanError(str(path), "path must be a directory"))
                 continue
+            before_errors = len(report.errors)
             directories, files = _snapshot(path, database.parent, connection, report)
-            fingerprints[path] = _fingerprint(directories, files)
+            if len(report.errors) == before_errors:
+                fingerprints[path] = _fingerprint(directories, files)
     return fingerprints, report.errors
 
 

@@ -12,6 +12,7 @@ from typing import Any
 
 from mutagen import MutagenError
 
+from muse.filesystem import WalkError, walk
 from muse.hashing import sha256_file
 from muse.media import MediaInfo, MediaInspectionError, inspect_media
 from muse.media_fixup import embed_cover, is_obvious_cover, repair_tags
@@ -195,19 +196,28 @@ def _inventory(
         raise ValueError("source must be a real file or directory")
 
     source_is_file = source.is_file()
-    candidates = [source] if source_is_file else sorted(source.rglob("*"))
+    entries = list(walk(source))
+    candidates = sorted(
+        (item for item in entries if not isinstance(item, WalkError)),
+        key=lambda item: item.path,
+    )
     files: list[ImportFile] = []
     artifacts: list[ImportArtifact] = []
-    blockers: list[str] = []
-    for path in candidates:
+    blockers: list[str] = [
+        f"{item.path}: {item.message}" for item in entries if isinstance(item, WalkError)
+    ]
+    for entry in candidates:
+        path = entry.path
+        if path == source and not source_is_file:
+            continue
         relative = "." if source_is_file else path.relative_to(source).as_posix()
         display = path.name if source_is_file else relative
-        if path.is_symlink():
+        if entry.kind == "symlink":
             blockers.append(f"symbolic links are not supported: {display}")
             continue
-        if path.is_dir():
+        if entry.kind == "directory":
             continue
-        if not path.is_file():
+        if entry.kind != "file":
             blockers.append(f"special files are not supported: {display}")
             continue
         extension = path.suffix.lower()
@@ -262,20 +272,19 @@ def _inventory(
 
 def _prepare(source: Path, *, single: bool = False) -> tuple[str, ...]:
     """Apply deterministic tag defaults and embed an unambiguous nearby cover."""
+    entries = list(walk(source))
+    for item in entries:
+        if isinstance(item, WalkError):
+            raise ValueError(f"automatic fixup failed for {item.path}: {item.message}")
+    regular = [
+        item.path for item in entries if not isinstance(item, WalkError) and item.kind == "file"
+    ]
     audio_paths = (
         [source]
         if source.is_file()
-        else sorted(
-            path
-            for path in source.rglob("*")
-            if path.is_file() and path.suffix.lower() in SUPPORTED_IMPORT_EXTENSIONS
-        )
+        else sorted(path for path in regular if path.suffix.lower() in SUPPORTED_IMPORT_EXTENSIONS)
     )
-    covers = (
-        []
-        if source.is_file()
-        else sorted(path for path in source.rglob("*") if path.is_file() and is_obvious_cover(path))
-    )
+    covers = [] if source.is_file() else sorted(path for path in regular if is_obvious_cover(path))
     changes: list[str] = []
     for audio in audio_paths:
         try:
