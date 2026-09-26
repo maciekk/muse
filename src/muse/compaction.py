@@ -60,6 +60,11 @@ class CompactProgress:
     worker_threads: int = 0
 
 
+def verification_workers(distinct_paths: int, max_threads: int | None) -> int:
+    """Return the number of workers used to reverify a pending plan."""
+    return min(max_threads or 16, distinct_paths, os.cpu_count() or 1) if distinct_paths else 0
+
+
 ProgressCallback = Callable[[CompactProgress], None]
 
 
@@ -293,9 +298,7 @@ def _apply_plan(
         for path in (retain, moved if moved is not None and occupied(moved) else remove)
     ]
     distinct_paths = len(dict.fromkeys(paths))
-    worker_threads = (
-        min(max_threads or 16, distinct_paths, os.cpu_count() or 1) if distinct_paths else 0
-    )
+    worker_threads = verification_workers(distinct_paths, max_threads)
     if progress is not None:
         progress(CompactProgress("verify", 0, total, worker_threads=worker_threads))
     metadata_plan = all(

@@ -2,7 +2,9 @@ import json
 import subprocess
 from pathlib import Path
 
-from muse.cli import _compact_path_texts, _extension_text, main
+from muse.cli import main
+from muse.commands.compact import _compact_path_texts
+from muse.commands.overview import _extension_text
 from muse.config import MANAGED_AREAS, MASTER_SHELVES
 
 
@@ -483,6 +485,29 @@ def test_mv_renames_content_and_reports_cached_hashes(tmp_path: Path, capsys) ->
     assert (root / "backlog" / "new").is_dir()
 
 
+def test_slag_inventory_and_extraction_share_directory_rendering(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    preserved = root / "slag" / "album"
+    preserved.mkdir()
+    (preserved / "notes.txt").write_text("notes")
+    candidate = root / "backlog" / "other"
+    candidate.mkdir()
+    (candidate / "save.sav").write_bytes(b"save")
+
+    assert main(["--root", str(root), "slag", "--dirs"]) == 0
+    inventory = capsys.readouterr().out
+    assert "Slag inventory" in inventory
+    assert "album" in inventory
+    assert "DIRECTORY" in inventory
+
+    assert main(["--root", str(root), "slag", "backlog/other", "--dirs"]) == 0
+    extraction = capsys.readouterr().out
+    assert "Slag extraction" in extraction
+    assert "other" in extraction
+    assert "DIRECTORY" in extraction
+
+
 def test_import_plans_then_applies_audio_only_directory(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
@@ -758,6 +783,8 @@ def test_scan_progress_can_be_forced(tmp_path: Path, capsys) -> None:
     captured = capsys.readouterr()
     assert result == 0
     assert json.loads(captured.out)["target_summary"]["extensions"] == {".flac": 1}
+    assert "Scanning target" not in captured.out
+    assert "target_summary" not in captured.err
 
 
 def test_relative_stats_target_is_beneath_root(tmp_path: Path, capsys) -> None:

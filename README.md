@@ -188,7 +188,7 @@ muse --color never status
 NO_COLOR=1 muse status
 ```
 
-Machine-readable JSON never contains terminal styling. Potentially slow operations delay their progress display to avoid flicker for quick work, but show it immediately when preflight identifies a large workload. Progress is written to stderr and can be controlled with `--progress auto|always|never`.
+Machine-readable JSON never contains terminal styling. Automatic progress waits two seconds to avoid flicker for quick scans, pulls, duplicate searches, compactions, and slag copies, but starts immediately when preflight identifies a large workload. `--progress always` starts immediately where that option is available. Progress is written to stderr and can be controlled with `--progress auto|always|never` on commands that offer it.
 
 ## Design and roadmap
 

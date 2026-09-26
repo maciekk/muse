@@ -367,3 +367,16 @@ Phase 3 checks: baseline 102 tests and Ruff lint passed; final full suite
 (115 tests), Ruff lint, CLI help, and `git diff --check` passed. Recovery tests inject failures
 at JSON replacement, copy publication, source removal, cache reconciliation,
 second compaction rename, and audit archival. No user vault was used.
+
+Phase 4 is complete. `muse.cli:main` remains the entry point and `cli.py` now
+contains argument parsing, dispatch, and search-term/help handling. The command
+workflows and their rendering live in `commands/overview.py`, `scan.py`,
+`duplicates.py`, `compact.py`, and `content.py`. `commands/progress.py` owns the
+Rich progress lifecycle and stderr policy; automatic displays wait two seconds
+unless the backend reports a large workload, while forced displays start at once.
+Slag inventory and extraction use one grouped renderer. Import and compaction
+renderers use concrete plan and operation types. README documents the progress
+delay policy. Tests cover the moved helpers, slag presentation, progress streams,
+delay, and cleanup after a scan exception. No user vault was used.
+Phase 4 checks: baseline 115 tests and Ruff lint passed; final full suite
+(118 tests), Ruff lint, CLI help, and `git diff --check` passed.
