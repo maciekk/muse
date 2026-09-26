@@ -1,6 +1,16 @@
 # Muse design
 
-This document records product and implementation design that is not necessarily implemented yet. `README.md` describes the commands that exist today. When the two differ, the README and command help describe current behavior; this document describes the intended direction.
+This document records product direction and proposed work. It includes historical
+design sketches, some of which have since been implemented differently. See
+`README.md` and command help for the current interface, and `ARCHITECTURE.md` for
+the current code and recovery model. Proposals here do not override either.
+
+Some import sections below are retained as design history. In particular,
+`prune-cache` is a proposed name (the implemented command is `prune`), current
+import planning can change tags and artwork and accept individual album
+selections, and compaction already records resumable trash receipts. The
+incremental import plan is historical, not a list of pending implementation
+phases.
 
 ## Principles
 
@@ -66,7 +76,11 @@ Release import and individual-track import require distinct validation profiles:
 - A standalone-single profile may use release validation when it is genuinely tagged as a one-track release, normally track `1/1`.
 - Reports and durable plans must identify the selected profile and whether content represents a complete release, a standalone single, or a selection. A standalone single may be imported either as a one-file directory or as the audio file itself; file imports can be added independently to a shared destination directory.
 
-The initial importer remains deliberately release-shaped: it requires album and album-artist tags and contiguous numbering beginning at one. A genuine `1/1` single can be imported as either a directory or a file. Importing individual files into an existing shared directory allows unrelated singles to coexist without treating the directory as one release. An untouched `7/12` album selection is expected to block. Future selection support must add the separate profile rather than weakening release-coherence checks or asking users to falsify tags.
+The current importer accepts release directories and individual audio files. It
+preserves the original album position of an individual selection, including
+`7/12`, while directory imports still require coherent release numbering. It
+requires essential album and artist tags and may fill deterministic defaults.
+Further selection policy should keep these two validation cases distinct.
 
 ## Command grammar and discoverability
 
@@ -279,7 +293,9 @@ A ready plan should summarize, at minimum:
 - optional post-import pruning across the backlog;
 - expected hashes and filesystem preconditions for every content operation.
 
-Planning may write only operational state beneath `.muse/`. `--apply` is required before changing user content.
+Current planning may also perform deterministic tag and artwork repairs in
+`backlog/`, with those changes shown in the preview. `--apply` is required before
+moving the planned content into `master/`.
 
 ### Application order
 
@@ -338,7 +354,9 @@ Completed operations are skipped. Pending operations run. Partial operations fin
 - Before moving a duplicate out of backlog, reverify the canonical master copy.
 - Empty-directory removal is repeatable and does not require trash.
 - Temporary implementation files may be unlinked; user content must remain represented in master, slag, or trash.
-- Use a repository-level application lock initially. Concurrent planning is acceptable, but concurrent applies are unsafe when post-import pruning can touch shared backlog trees.
+- Use a repository-level mutation lock. Current import planning holds it because
+  planning may change tags or artwork; application and other managed mutations
+  also hold it.
 
 `muse status` should expose interrupted or blocked work and print the source-based command needed to resume it.
 
@@ -480,7 +498,7 @@ JSON output should represent the same source, destination, decisions, blockers, 
 
 Progress remains on stderr. Plan/report data remains on stdout.
 
-## Strict usable import milestone
+## Original strict import milestone (historical)
 
 The first production-useful import should be a strict readiness gate, not a metadata editor. Work that users can safely perform with existing tools—correcting tags, choosing artwork, renaming files, or resolving unusual artifacts—should remain user work initially. Muse inspects the prepared source, explains every blocker, and permits import only when the album is ready. This keeps the first trustworthy workflow small without weakening its guarantees.
 
@@ -500,7 +518,7 @@ An album is ready only when Muse can:
 - preserve all content in `master/`, `slag/`, or `trash/` as planned;
 - verify the final state and retain an audit record.
 
-## Incremental implementation
+## Original incremental implementation plan (historical)
 
 This design should be delivered in small vertical slices rather than one large change. The sequence toward the strict usable milestone is:
 
@@ -574,9 +592,3 @@ Each slice should include tests for:
 - human and JSON output remaining consistent.
 
 Tests should use explicit failpoints around durable writes, renames, verified copies, and source removal so power-loss recovery is exercised deterministically.
-
-## External source assessment
-
-`muse scan DIR` compares a prospective external source with every vault content area before it is added to `backlog/`. The default read-only pass uses case-insensitive filenames and sizes as a cheap heuristic; `--thorough` verifies SHA-256 content checksums regardless of names or paths. The target inventory has terminal progress. Reports begin with the target's unambiguous-audio extension mix (`.mp4` is not one); comparison and not-found results likewise ignore photos and all other unrelated files. Audio files not found in the vault are grouped by directory, with only a handful of the largest examples shown per directory by default; `--all` expands the terminal report to every directory and file, while machine-readable output always retains every not-found audio path.
-
-`muse scan DIR --pull` turns a reviewed scan into backlog intake without adding an option argument. After reporting, it prompts for a new destination beneath `backlog/`. Muse copies each whole directory containing not-found audio so release-adjacent `.nfo`, `.cue`, artwork, booklets, checksums, and other unknown artifacts remain available for later curation. Ancestor selections subsume nested selected directories. Copying reports determinate file and byte progress using the scan command's `--progress` display policy. Pulling is refused when the scan has errors, the scan target is a single file, the destination already exists, or JSON output was requested. The copy is assembled in a temporary sibling and renamed into place, preventing an interrupted copy from looking complete.

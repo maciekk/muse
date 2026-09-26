@@ -190,9 +190,9 @@ NO_COLOR=1 muse status
 
 Machine-readable JSON never contains terminal styling. Automatic progress waits two seconds to avoid flicker for quick scans, pulls, duplicate searches, compactions, and slag copies, but starts immediately when preflight identifies a large workload. `--progress always` starts immediately where that option is available. Progress is written to stderr and can be controlled with `--progress auto|always|never` on commands that offer it.
 
-## Design and roadmap
+## Documentation
 
-See [`DESIGN.md`](DESIGN.md) for proposed behavior, implementation constraints, and incremental plans. It describes future work and is not a list of currently available commands; this README and the CLI help document the implemented interface.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the current code and recovery model, and [`DESIGN.md`](DESIGN.md) for proposed behavior and future work. This README and the CLI help document the implemented interface.
 
 ## Installation
 
