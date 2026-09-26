@@ -39,46 +39,125 @@ Muse never scans the OS-managed `~/Music/` directory by default.
 
 ## Current commands
 
-```bash
-muse                       # show styled help
-muse help dupes            # show dupes arguments and options
-muse doctor                # inspect layout and supporting tools
-muse status                # show top-level repository status
-muse stats                 # count files and disk usage
-muse stats backlog         # inspect one path beneath the root
-muse stats --json
-muse scan /media/old-drive  # quickly find files that appear absent from the vault
-muse scan /media/old-drive --thorough  # verify presence by SHA-256 content checksum
-muse scan /media/old-drive --progress always  # force target-scan progress display
-muse scan /media/old-drive --all  # list every not-found audio file
-muse scan /media/old-drive --pull  # copy containing directories into a prompted backlog path
-muse search battle theme  # case-insensitive filename search across the vault
-muse search remix -live   # exclude paths containing "live"
-muse search "final fantasy" --json
-muse dupes                 # find exact duplicates across the library
-muse dupes backlog         # inspect one path beneath the root
-muse dupes --rehash        # bypass the persistent hash cache
-muse dupes --trees backlog  # report maximal exact duplicate directory trees
-muse dupes backlog --all    # show every duplicate group
-muse dupes backlog --max-threads 4  # limit concurrent hashing workers
-muse prune                   # discard hashes for files that no longer exist
-muse diff tree-a tree-b      # explain why two trees differ
-muse compact [backlog]        # create the sole pending compaction plan
-muse compact backlog --prefer backlog/archive-a --prefer backlog/archive-b
-muse compact backlog --all    # show every move in the new plan
-muse compact --apply          # reverify, confirm, then apply that plan
-muse import backlog/album games/album  # plan a minimal audio-only import
-muse import backlog/album --apply      # reverify, confirm, then move it into master
-muse import backlog/album --abort      # discard a ready import plan
-muse mv old-path new-path     # move or rename content; preserve cached hashes
-muse slag                      # inspect preserved non-music artifacts
-muse slag backlog/pc-2007 --apply
-muse slag backlog/pc-2007 --thorough  # include artwork and release-adjacent files
-muse dupes --progress always
-muse dupes --json
+Muse uses a flat command grammar:
+
+```text
+muse COMMAND [PATH ...] [--OPTION ...]
 ```
 
-Muse uses a flat command grammar: `muse COMMAND [PATH ...] [--OPTION ...]`. Positional arguments after the command are filesystem scopes or, for `search`, query terms; operations use distinct command names or dashed options. `scan` compares an external file or directory with every content area (`master`, `stopgap`, `incoming`, `backlog`, and `slag`). Its quick mode treats a case-insensitive filename and size match as a likely copy; `--thorough` ignores names and locations and verifies SHA-256 content checksums. Relative scan targets are resolved from the current working directory, unlike vault-scoped command paths. It shows progress while inventorying the target, then reports the definite-audio extension mix and coverage. Only definite audio files are reported or compared with the vault; photos and other files are ignored. Not-found audio is grouped by directory with a handful of the largest files from each; `--all` expands the terminal table, and JSON output always includes every not-found audio path. With `--pull`, Muse prompts for a new relative destination beneath `backlog/` and copies each whole directory containing not-found audio, preserving adjacent cue sheets, artwork, booklets, and metadata; nested selected directories are copied only once. The copy has a byte-based progress bar governed by the scan command's `--progress` policy. Pull refuses scan errors, file targets, existing destinations, and `--json`. `.mp4` is treated as ambiguous/non-audio because the same container is commonly used for home movies. `search` recursively checks file and directory names in all content areas without following symlinks or searching internal `.muse` state. Matching is case-insensitive and every positive term must occur in the name; prefix a term with `-` to exclude results containing it anywhere in their vault-relative path. The initial `import` implementation deliberately accepts only nonempty, audio-only directories beneath `backlog/`. It uses ffprobe and ffmpeg to recognize and fully decode MP3, M4A (AAC or Apple Lossless), Ogg Vorbis/Opus, common PCM WAV, and FLAC; checks essential tags and album numbering; and runs the native FLAC integrity check when available. It does not edit tags, embed artwork, or classify artifacts. A destination is required to create its durable plan, and only `--apply` moves the planned directory into `master/`. `doctor`, `status`, and `stats` do not modify the repository or create Muse state. `dupes` never changes music files, but stores SHA-256 hashes and file size/modification-time metadata in `.muse/muse.db`; unchanged files reuse their cached hashes on later runs. Files with a size that occurs only once cannot be exact duplicates and are not hashed by the default report. Zero-byte files are also omitted from the ordinary duplicate-file report; `stats` counts them separately so suspicious empty files remain visible. `--trees` includes zero-byte files when comparing the structure of trees that contain data, but omits duplicate tree groups whose total size is zero. Human-readable `dupes` output shows the 10 largest duplicate groups by default; use `--all` for the complete table or `--json` for complete structured output. Use `--rehash` to bypass cached hashes. `prune` immediately removes cache entries whose files no longer exist; it never changes library content, and an accidentally discarded hash can be recomputed.
+Arguments after the command are filesystem scopes, except for `search`, where they are query terms. Run `muse` for styled help or `muse help COMMAND` for details about a command.
+
+### Inspect the vault
+
+These commands are read-only and do not create Muse state.
+
+```bash
+muse doctor                 # inspect layout and supporting tools
+muse status                 # show top-level repository status
+muse stats                  # count files and disk usage
+muse stats backlog          # inspect one path beneath the root
+muse stats --json           # emit structured output
+```
+
+### Find music
+
+```bash
+muse search battle theme              # require both terms, case-insensitively
+muse search remix -live               # exclude paths containing "live"
+muse search "final fantasy" --json    # emit structured output
+
+muse scan /media/old-drive            # quickly find audio absent from the vault
+muse scan /media/old-drive --thorough # compare SHA-256 content checksums
+muse scan /media/old-drive --all      # list every not-found audio file
+muse scan /media/old-drive --pull     # copy relevant directories into backlog
+muse scan /media/old-drive --progress always
+```
+
+#### Search behavior
+
+- `search` checks file and directory names in every content area.
+- Matching is case-insensitive, and every positive term must occur in the name.
+- Prefix a term with `-` to exclude results containing it anywhere in the vault-relative path.
+- Symlinks are not followed, and internal `.muse` state is not searched.
+
+#### Scan behavior
+
+- `scan` compares an external file or directory with `master`, `stopgap`, `incoming`, `backlog`, and `slag`.
+- Relative scan targets are resolved from the current working directory, unlike vault-scoped paths.
+- Quick mode uses a case-insensitive filename and size match as a likely copy. `--thorough` ignores names and locations and verifies SHA-256 checksums.
+- Only definite audio files are compared and reported. `.mp4` is considered ambiguous because it commonly contains home video; photos and other files are ignored.
+- Results include the target's definite-audio extension mix and coverage. Not-found audio is grouped by directory, with a few of each directory's largest files shown. `--all` expands the terminal table; JSON always contains every path.
+
+With `--pull`, Muse prompts for a new relative destination beneath `backlog/`. It copies each whole directory containing not-found audio, including adjacent cue sheets, artwork, booklets, and metadata. Nested selected directories are copied only once. Pull refuses scan errors, file targets, existing destinations, and `--json`; its byte-based progress bar follows the scan command's `--progress` policy.
+
+### Find and manage duplicates
+
+```bash
+muse dupes                         # find exact duplicate files
+muse dupes backlog                 # limit the search to one vault path
+muse dupes --trees backlog         # find maximal duplicate directory trees
+muse dupes backlog --all           # show every duplicate group
+muse dupes backlog --max-threads 4 # limit concurrent hashing workers
+muse dupes --rehash                # bypass the persistent hash cache
+muse dupes --progress always
+muse dupes --json
+
+muse diff tree-a tree-b            # explain why two trees differ
+muse prune                         # discard hashes for files that no longer exist
+```
+
+`dupes` does not change music files. It stores SHA-256 hashes and file size/modification-time metadata in `.muse/muse.db`, then reuses hashes for unchanged files. The default report avoids hashing files whose size occurs only once, since they cannot be exact duplicates.
+
+Duplicate reporting rules:
+
+- Human-readable output shows the 10 largest groups by default. Use `--all` or `--json` for all groups.
+- Zero-byte files are omitted from the ordinary duplicate-file report; `stats` counts them separately.
+- `--trees` includes zero-byte files when comparing trees that contain data, but omits tree groups whose total size is zero.
+- `--rehash` bypasses cached hashes.
+- `prune` only removes cache entries for missing files. It never changes library content, and discarded hashes can be recomputed.
+
+### Plan and apply library changes
+
+```bash
+muse import backlog/album games/album # create a durable import plan
+muse import backlog/album --apply     # reverify and move it into master
+muse import backlog/album --abort     # discard a ready import plan
+
+muse compact [backlog]                # create the sole compaction plan
+muse compact backlog --prefer backlog/archive-a --prefer backlog/archive-b
+muse compact backlog --all            # show every move in the new plan
+muse compact --apply                  # reverify, confirm, and apply the plan
+
+muse mv old-path new-path             # move content and preserve cached hashes
+```
+
+#### Import
+
+The initial `import` implementation accepts only nonempty, audio-only directories beneath `backlog/`. It:
+
+- uses ffprobe and ffmpeg to recognize and fully decode MP3, M4A (AAC or Apple Lossless), Ogg Vorbis/Opus, common PCM WAV, and FLAC;
+- checks essential tags and album numbering; and
+- runs the native FLAC integrity check when available.
+
+Import does not edit tags, embed artwork, or classify artifacts. A destination is required to create a plan, and only `--apply` moves the planned directory into `master/`.
+
+#### Compaction
+
+Compaction reverifies every planned duplicate tree before mutation, then moves redundant trees into a dated receipt beneath `trash/`, preserving their repository-relative paths. These same-filesystem renames are cheap and recoverable; permanent trash purging is a separate future operation.
+
+Repeat `--prefer PATH` in priority order to favor authoritative subtrees within a duplicate group. Preferences rank copies only within the same managed-area tier, so the built-in `master`, `backlog`, `stopgap`, `incoming`, `slag`, and `trash` policy still takes precedence.
+
+Plans record filenames, file sizes, and high-resolution modification/change timestamps. Applying a current plan therefore does not need to hash content or query the hash cache per file; older pending plans fall back to content-fingerprint verification.
+
+### Preserve non-music artifacts
+
+```bash
+muse slag                              # inspect preserved non-music artifacts
+muse slag backlog/pc-2007 --apply
+muse slag backlog/pc-2007 --thorough  # include artwork and release-adjacent files
+```
+
+`slag/` isolates non-music artifacts moved from backlog for later triage. It retains the original backlog-relative path so provenance remains visible.
 
 ## Terminal output
 
@@ -92,10 +171,6 @@ NO_COLOR=1 muse status
 ```
 
 Machine-readable JSON never contains terminal styling. Potentially slow operations delay their progress display to avoid flicker for quick work, but show it immediately when preflight identifies a large workload. Progress is written to stderr and can be controlled with `--progress auto|always|never`.
-
-`slag/` isolates non-music artifacts moved from backlog for later triage. It retains the original backlog-relative path so provenance remains visible.
-
-Compaction reverifies every planned duplicate tree immediately before mutation, then moves redundant trees into a dated operation receipt beneath `trash/`, preserving their original repository-relative paths. Repeat `--prefer PATH` in priority order when planning to favor authoritative subtrees: for each duplicate group, Muse retains a copy beneath the first matching preferred path. Preferences rank copies only within the same managed-area tier, so the built-in `master`, `backlog`, `stopgap`, `incoming`, `slag`, and `trash` policy still takes precedence. Plans record each tree's filenames, file sizes, and high-resolution modification/change timestamps, so applying a current plan does not need to hash content or query the hash cache per file; older pending plans fall back to content-fingerprint verification. These same-filesystem renames are cheap and recoverable; permanent trash purging is a separate future operation.
 
 ## Design and roadmap
 
