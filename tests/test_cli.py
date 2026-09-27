@@ -48,6 +48,7 @@ def test_every_command_help_starts_with_a_summary(capsys) -> None:
         "status": "Show top-level repository status.",
         "stats": "Report file counts and disk usage.",
         "scan": "Check whether an external tree contains files absent from the vault.",
+        "check": "Fully decode audio files to find playback errors.",
         "search": "Find files or directories by name across the vault.",
         "dupes": "Find byte-identical files; names and locations need not match.",
         "prune": "Remove missing files from the hash cache.",

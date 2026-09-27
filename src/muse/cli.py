@@ -10,6 +10,7 @@ from functools import partial
 from rich_argparse import RichHelpFormatter
 
 from muse import __version__
+from muse.commands.check import _check_audio
 from muse.commands.compact import _compact
 from muse.commands.content import _import, _move, _slag
 from muse.commands.duplicates import _diff, _dupes, _prune
@@ -136,6 +137,11 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     _add_max_threads_argument(scan)
     _add_json_argument(scan)
     scan.set_defaults(handler=_scan)
+
+    check = command("check", "fully decode audio files to find playback errors")
+    check.add_argument("target", help="audio file or directory to check recursively")
+    _add_json_argument(check)
+    check.set_defaults(handler=_check_audio)
 
     search = command("search", "find files or directories by name across the vault")
     search.add_argument(

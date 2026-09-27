@@ -57,7 +57,18 @@ muse status                 # show top-level repository status
 muse stats                  # count files and disk usage
 muse stats backlog          # inspect one path beneath the root
 muse stats --json           # emit structured output
+muse check backlog          # fully decode audio recursively to find playback errors
+muse check /media/old-drive/track.flac --json
 ```
+
+`check` accepts one audio file or a directory. Relative targets use the current working
+directory, including paths outside the vault. It checks recognized audio extensions with
+FFmpeg, compares decoded length with the duration reported by FFprobe, and uses
+`flac --test` for FLAC files when that tool is installed. It skips other
+files and symlinks, lists failures, and exits with status 1 if a file fails or traversal
+has an error. A duration difference greater than both 5 seconds and 5% is reported as
+a failure. A successful decode cannot prove that all intended audio is present in
+formats without an embedded checksum or trustworthy original to compare against.
 
 ### Find music
 
