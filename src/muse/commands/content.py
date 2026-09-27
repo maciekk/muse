@@ -310,7 +310,12 @@ def _move(args: argparse.Namespace, root: Path) -> int:
     source = resolve_target(root, args.source)
     destination = resolve_target(root, args.destination)
     try:
-        result = move(root, source, destination)
+        result = move(
+            root,
+            source,
+            destination,
+            destination_is_directory=args.destination.endswith("/"),
+        )
     except ValueError as error:
         console = make_console(args.color, stderr=True)
         console.print(f"[red]{args.command} refused:[/red] {error}")

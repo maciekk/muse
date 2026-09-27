@@ -40,6 +40,20 @@ def test_move_places_source_inside_existing_directory(tmp_path: Path) -> None:
     assert (destination / "source").is_dir()
 
 
+def test_move_trailing_slash_creates_directory_and_keeps_source_directory(tmp_path: Path) -> None:
+    root = tmp_path / "music-vault"
+    source = root / "backlog" / "albumA"
+    source.mkdir(parents=True)
+    (source / "song.flac").write_bytes(b"audio")
+    destination = root / "backlog" / "dest" / "dir"
+
+    result = move(root, source, f"{destination}/")
+
+    assert result.destination == str(destination / "albumA")
+    assert (destination / "albumA" / "song.flac").read_bytes() == b"audio"
+    assert not source.exists()
+
+
 def test_move_refuses_outside_root_or_existing_file(tmp_path: Path) -> None:
     root = tmp_path / "music-vault"
     source = root / "backlog" / "source"

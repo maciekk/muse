@@ -88,6 +88,18 @@ def test_plan_and_apply_audio_only_import(tmp_path: Path) -> None:
     assert list((root / ".muse" / "audit").glob("import-*.json"))
 
 
+def test_import_trailing_slash_creates_directory_and_keeps_album_name(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = make_source(root)
+
+    plan = make_plan(root, source, "games/new/dir/")
+
+    assert plan.destination == "master/games/new/dir/album"
+    assert not (root / "master" / "games" / "new").exists()
+    apply_plan(root)
+    assert (root / plan.destination / "01.flac").is_file()
+
+
 def test_plan_suggests_artist_release_destination_from_tags(tmp_path: Path) -> None:
     root = tmp_path / "vault"
     source = make_source(root)

@@ -177,6 +177,8 @@ muse compact --apply                  # reverify, confirm, and apply the plan
 muse mv old-path new-path             # move content and preserve cached hashes
 ```
 
+For `mv` and `import`, a destination ending in `/` names a directory. Muse creates it and any missing parents when applying the operation, then places the source file or directory inside it. For example, `muse mv backlog/albumA backlog/dest/dir/` results in `backlog/dest/dir/albumA`.
+
 #### Import
 
 The `import` implementation accepts nonempty release directories and individual audio files beneath `backlog/`. It:

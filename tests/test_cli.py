@@ -574,6 +574,21 @@ def test_import_plans_then_applies_audio_only_directory(
     assert (root / "master" / "games" / "new-album" / "song.flac").is_file()
 
 
+def test_mv_trailing_slash_places_album_inside_new_directory(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    source = root / "backlog" / "albumA"
+    source.mkdir()
+    (source / "song.flac").write_bytes(b"audio")
+
+    result = main(["--root", str(root), "mv", "backlog/albumA", "backlog/dest/dir/", "--json"])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["destination"] == str(root / "backlog" / "dest" / "dir" / "albumA")
+    assert (root / "backlog" / "dest" / "dir" / "albumA" / "song.flac").is_file()
+
+
 def test_import_asks_to_accept_inconsistent_album_artists(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:

@@ -160,7 +160,7 @@ muse import backlog/some-game-soundtrack master/games/
 
 Both resolve beneath `<root>/master/games/`. Absolute destinations and `..` traversal are rejected. Prefixes for other managed areas are rejected. The normalized explicit `master/...` path is stored in the plan and shown in output.
 
-If the destination names an existing directory, the source directory name is appended, matching normal move behavior. A nonexistent destination denotes the exact final path. This rule must be made conspicuous in previews and covered by tests because destination ambiguity is dangerous.
+If the destination names an existing directory or ends in `/`, the source name is appended, matching normal move behavior. A nonexistent destination without a trailing slash denotes the exact final path. Missing directory destinations are created during application. This rule must be made conspicuous in previews and covered by tests because destination ambiguity is dangerous.
 
 When no source or destination is supplied, the sole current import plan is shown. A new plan may propose a destination from tags and organization policy, but an unresolved destination blocks application. Only one current import plan may exist at a time, so apply and abort do not require repeating its source path.
 

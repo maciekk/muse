@@ -52,13 +52,22 @@ def _move_entry(source: Path, destination: Path, identity: list[int]) -> None:
         rename_exact(source, destination)
 
 
-def move(root: Path, source: Path, destination: Path) -> MoveResult:
+def move(
+    root: Path,
+    source: Path,
+    destination: Path | str,
+    *,
+    destination_is_directory: bool = False,
+) -> MoveResult:
     """Move a path and its companion slag path, resuming an interrupted rename."""
+    destination_is_directory |= isinstance(destination, str) and destination.endswith("/")
     with mutation_lock(root):
-        return _move(root, source, destination)
+        return _move(root, source, Path(destination), destination_is_directory)
 
 
-def _move(root: Path, source: Path, destination: Path) -> MoveResult:
+def _move(
+    root: Path, source: Path, destination: Path, destination_is_directory: bool = False
+) -> MoveResult:
     root = root.absolute()
     source, requested = source.absolute(), destination.absolute()
     if not source.is_relative_to(root) or not requested.is_relative_to(root):
@@ -84,12 +93,20 @@ def _move(root: Path, source: Path, destination: Path) -> MoveResult:
             if requested.is_symlink() or not requested.is_dir():
                 raise ValueError("destination already exists and is not a directory")
             destination = requested / source.name
+        elif destination_is_directory:
+            destination = requested / source.name
         else:
             destination = requested
         checked_path(root, destination.relative_to(root))
         if occupied(destination):
             raise ValueError("destination already contains an entry with that name")
-        if not destination.parent.is_dir():
+        if destination_is_directory:
+            existing_parent = destination.parent
+            while not occupied(existing_parent) and existing_parent != root:
+                existing_parent = existing_parent.parent
+            if not existing_parent.is_dir():
+                raise ValueError("destination has a non-directory parent")
+        elif not destination.parent.is_dir():
             raise ValueError("destination parent does not exist")
         if source.is_dir() and destination.is_relative_to(source):
             raise ValueError("cannot move a directory into itself")

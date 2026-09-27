@@ -401,6 +401,7 @@ def _prepare(source: Path, *, single: bool = False) -> tuple[str, ...]:
 
 
 def _destination(root: Path, source: Path, value: str | Path) -> Path:
+    destination_is_directory = isinstance(value, str) and value.endswith("/")
     raw = Path(value)
     if raw.is_absolute() or ".." in raw.parts:
         raise ValueError("destination must be a relative path beneath master/")
@@ -426,7 +427,9 @@ def _destination(root: Path, source: Path, value: str | Path) -> Path:
         if not destination.is_dir() or destination.is_symlink():
             raise ValueError("destination already exists and is not a directory")
         destination /= source.name
-    elif source.is_file() and destination.suffix.lower() != source.suffix.lower():
+    elif destination_is_directory or (
+        source.is_file() and destination.suffix.lower() != source.suffix.lower()
+    ):
         # A non-audio destination for a file is naturally a collection directory.
         destination /= source.name
     if occupied(destination):
