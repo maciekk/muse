@@ -10,6 +10,7 @@ from functools import partial
 from rich_argparse import RichHelpFormatter
 
 from muse import __version__
+from muse.commands.art import _fix_art
 from muse.commands.check import _check_audio
 from muse.commands.compact import _compact
 from muse.commands.content import _import, _move, _slag
@@ -142,6 +143,39 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     check.add_argument("target", help="audio file or directory to check recursively")
     _add_json_argument(check)
     check.set_defaults(handler=_check_audio)
+
+    fix_art = command("fix-art", "find and embed better album artwork")
+    fix_art.add_argument(
+        "targets",
+        nargs="+",
+        metavar="PATH",
+        help="audio files or directories beneath the library root",
+    )
+    fix_art.add_argument(
+        "--min-size",
+        type=_positive_int,
+        default=600,
+        metavar="PIXELS",
+        help="minimum width and height (default: 600)",
+    )
+    fix_art.add_argument(
+        "--force",
+        action="store_true",
+        help="replace existing art even when resolution is not higher",
+    )
+    fix_art.add_argument(
+        "--cover",
+        metavar="IMAGE",
+        help="use a local JPEG or PNG for one album instead of searching",
+    )
+    fix_art.add_argument(
+        "--allow-small",
+        action="store_true",
+        help="accept artwork below --min-size without an interactive prompt",
+    )
+    fix_art.add_argument("--apply", action="store_true", help="embed artwork in selected files")
+    _add_json_argument(fix_art)
+    fix_art.set_defaults(handler=_fix_art)
 
     search = command("search", "find files or directories by name across the vault")
     search.add_argument(

@@ -144,8 +144,8 @@ def repair_tags(path: Path, *, single: bool = False) -> tuple[str, ...]:
             os.chmod(path, stat.S_IMODE(original_mode))
 
 
-def embed_cover(path: Path, cover: Path) -> bool:
-    """Embed a front cover if the audio file does not already contain artwork."""
+def embed_cover(path: Path, cover: Path, *, replace: bool = False) -> bool:
+    """Embed a front cover, optionally replacing existing artwork."""
     data, mime = _image(cover)
     suffix = path.suffix.lower()
     original_mode = path.stat().st_mode
@@ -157,14 +157,24 @@ def embed_cover(path: Path, cover: Path) -> bool:
                 tags = ID3(path)
             except ID3NoHeaderError:
                 tags = ID3()
-            if tags.getall("APIC"):
+            if tags.getall("APIC") and not replace:
                 return False
+            if replace:
+                pictures = [picture for picture in tags.getall("APIC") if picture.type != 3]
+                tags.delall("APIC")
+                for picture in pictures:
+                    tags.add(picture)
             tags.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=data))
             tags.save(path)
         elif suffix == ".flac":
             audio = FLAC(path)
-            if audio.pictures:
+            if audio.pictures and not replace:
                 return False
+            if replace:
+                pictures = [picture for picture in audio.pictures if picture.type != 3]
+                audio.clear_pictures()
+                for picture in pictures:
+                    audio.add_picture(picture)
             picture = Picture()
             picture.type, picture.mime, picture.desc, picture.data = 3, mime, "Cover", data
             audio.add_picture(picture)
@@ -174,26 +184,40 @@ def embed_cover(path: Path, cover: Path) -> bool:
             if audio.tags is None:
                 audio.add_tags()
             assert audio.tags is not None
-            if audio.tags.get("covr"):
+            if audio.tags.get("covr") and not replace:
                 return False
             image_format = MP4Cover.FORMAT_PNG if mime == "image/png" else MP4Cover.FORMAT_JPEG
             audio.tags["covr"] = [MP4Cover(data, imageformat=image_format)]
             audio.save()
         elif suffix in {".ogg", ".oga", ".opus"}:
             audio = OggOpus(path) if suffix == ".opus" else OggVorbis(path)
-            if audio.get("metadata_block_picture"):
+            if audio.get("metadata_block_picture") and not replace:
                 return False
+            pictures = []
+            if replace:
+                for encoded in audio.get("metadata_block_picture", []):
+                    previous = Picture(base64.b64decode(encoded))
+                    if previous.type != 3:
+                        pictures.append(encoded)
             picture = Picture()
             picture.type, picture.mime, picture.desc, picture.data = 3, mime, "Cover", data
-            audio["metadata_block_picture"] = [base64.b64encode(picture.write()).decode("ascii")]
+            audio["metadata_block_picture"] = [
+                *pictures,
+                base64.b64encode(picture.write()).decode("ascii"),
+            ]
             audio.save()
         elif suffix == ".wav":
             audio = WAVE(path)
             if audio.tags is None:
                 audio.add_tags()
             assert audio.tags is not None
-            if audio.tags.getall("APIC"):
+            if audio.tags.getall("APIC") and not replace:
                 return False
+            if replace:
+                pictures = [picture for picture in audio.tags.getall("APIC") if picture.type != 3]
+                audio.tags.delall("APIC")
+                for picture in pictures:
+                    audio.tags.add(picture)
             audio.tags.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=data))
             audio.save()
         else:

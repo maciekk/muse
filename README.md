@@ -70,6 +70,36 @@ has an error. A duration difference greater than both 5 seconds and 5% is report
 a failure. A successful decode cannot prove that all intended audio is present in
 formats without an embedded checksum or trustworthy original to compare against.
 
+### Upgrade embedded album artwork
+
+```bash
+muse fix-art backlog/old-album              # preview MusicBrainz match and cover dimensions
+muse fix-art master/artists/Artist/Album --apply
+muse fix-art backlog/one.mp3 --min-size 1000 --json
+muse fix-art backlog/old-album --cover /path/to/front.jpg --apply
+muse fix-art backlog/old-album --allow-small --apply
+```
+
+`fix-art` accepts one or more audio files or directories beneath the library root and
+recurses into directories without following symlinks. It uses a tagged MusicBrainz
+release ID when available, otherwise a release-group ID, otherwise an album and
+album-artist search. If an exact title is absent, a unique release-group title extending
+a long tagged prefix is accepted. Ambiguous matches and missing covers are skipped.
+Artwork comes from the Cover Art Archive's original front-cover endpoint (up to 20 MB
+per image). Use `--cover IMAGE` to supply a local image for one tagged album when the
+online search has no usable result. The default minimum is 600 pixels in both dimensions.
+Muse also requires a new image to be at least as large in both dimensions and larger in
+one before replacing an existing cover. If either condition fails, an interactive
+terminal shows both image sizes and asks whether to replace the affected files anyway.
+One approval overrides both checks for that album. In scripts or JSON mode, blocked
+files are reported as needing approval; use `--allow-small` and/or `--force` to make the
+choice explicitly. JPEG and PNG are supported. The
+command shows a preview by default; `--apply` embeds the image in each eligible file
+through an atomic file replacement. Originals are preserved under `.muse/art-backups/`
+and each updated file reports its backup path. Network access is required. Failures are
+reported per album or file, and a failed album does not prevent other selected albums
+from being processed.
+
 ### Find music
 
 ```bash
