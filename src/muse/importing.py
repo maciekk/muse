@@ -31,6 +31,22 @@ from muse.repository import AUDIO_EXTENSIONS
 
 SCHEMA_VERSION = 3
 SUPPORTED_IMPORT_EXTENSIONS = frozenset({".flac", ".m4a", ".mp3", ".ogg", ".oga", ".opus", ".wav"})
+IMAGE_EXTENSIONS = frozenset(
+    {
+        ".avif",
+        ".bmp",
+        ".gif",
+        ".heic",
+        ".heif",
+        ".jpeg",
+        ".jpg",
+        ".jxl",
+        ".png",
+        ".tif",
+        ".tiff",
+        ".webp",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -280,19 +296,24 @@ def _inventory(
             continue
         extension = path.suffix.lower()
         if extension not in AUDIO_EXTENSIONS:
-            if not source_is_file and is_obvious_cover(path):
+            if not source_is_file and extension in IMAGE_EXTENSIONS:
                 try:
                     stat = path.stat()
                     if stat.st_size == 0:
                         findings.append(
-                            ImportFinding("empty_cover", f"empty cover image: {display}", relative)
+                            ImportFinding("empty_image", f"empty image file: {display}", relative)
                         )
                     else:
                         artifacts.append(
-                            ImportArtifact(relative, stat.st_size, sha256_file(path), "cover")
+                            ImportArtifact(
+                                relative,
+                                stat.st_size,
+                                sha256_file(path),
+                                "cover" if is_obvious_cover(path) else "image",
+                            )
                         )
                 except OSError as error:
-                    findings.append(ImportFinding("cover_error", f"{display}: {error}", relative))
+                    findings.append(ImportFinding("image_error", f"{display}: {error}", relative))
             else:
                 findings.append(
                     ImportFinding(

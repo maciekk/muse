@@ -341,6 +341,40 @@ def test_import_refuses_changed_or_non_audio_content(tmp_path: Path) -> None:
         make_plan(root, other, "games/with-notes")
 
 
+def test_import_preserves_cover_and_booklet_images(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = make_source(root)
+    booklet = source / "booklet"
+    booklet.mkdir()
+    (source / "back.jpg").write_bytes(b"\xff\xd8\xffback")
+    (booklet / "page 1.PNG").write_bytes(b"\x89PNG\r\n\x1a\npage")
+
+    plan = make_plan(root, source, "games/")
+
+    assert [(item.path, item.kind) for item in plan.artifacts] == [
+        ("back.jpg", "image"),
+        ("booklet/page 1.PNG", "image"),
+    ]
+    assert plan.fixups == ()
+
+    apply_plan(root)
+    destination = root / "master" / "games" / "album"
+    assert (destination / "back.jpg").read_bytes() == b"\xff\xd8\xffback"
+    assert (destination / "booklet" / "page 1.PNG").read_bytes() == b"\x89PNG\r\n\x1a\npage"
+
+
+def test_import_rechecks_image_content_before_apply(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    source = make_source(root)
+    image = source / "back.jpg"
+    image.write_bytes(b"original")
+    make_plan(root, source, "games/")
+    image.write_bytes(b"changed")
+
+    with pytest.raises(ValueError, match="content has changed"):
+        apply_plan(root)
+
+
 def test_import_repairs_safe_missing_tags_and_preserves_and_embeds_cover(tmp_path: Path) -> None:
     root = tmp_path / "vault"
     source = root / "backlog" / "album"
