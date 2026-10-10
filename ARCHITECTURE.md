@@ -20,7 +20,7 @@ Rich.
 | Fresh SHA-256 and file identity | `hashing.py` |
 | SQLite hash cache schema and operations | `cache.py` |
 | Durable item identity and exact-version history | `ledger.py` |
-| Transport-independent Apple bridge documents | `apple_protocol.py` |
+| Apple bridge documents and test double | `apple_protocol.py`, `apple_fake_bridge.py` |
 | Recursive tree fingerprint encoding | `trees.py` |
 | Duplicate and tree comparison workflows | `duplicates.py`, `tree_diff.py` |
 | External scan and backlog pull | `scanning.py` |
@@ -42,7 +42,11 @@ bridge request/result documents. Requests use UUID batch and operation identitie
 bind staged files by size and SHA-256, and carry only managed playlist requests.
 Results bind to the canonical request digest, report capabilities and explicit
 success, failure, or uncertainty, and must correlate exactly before acceptance.
-The documents do not assume SSH or any other transport.
+The documents do not assume SSH or any other transport. `apple_fake_bridge.py`
+provides an in-process test double with batch and operation journals, deterministic
+Apple IDs, injected failure and uncertainty outcomes, and interruption simulation.
+It lets later export, import, and planning work exercise duplicate-safe retries
+without macOS or Music.app; its journal is intentionally not persistent.
 
 The current implementation does not maintain a canonical beets catalogue, a
 disposable metadata index, or an operational Apple adapter. `doctor` still labels
