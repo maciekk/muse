@@ -16,4 +16,6 @@
 - Rebuildable indexes are non-authoritative; files win disagreements with a cache.
 - Metadata preparation tools are optional and interchangeable.
 - Apple is a replaceable publication surface and owns live playback behaviour.
+- Canonical admission does not imply Apple publication; publication is opt-in and explicit exclusions must survive broad selections.
+- The subscription-free device path is Music.app import followed by separate Finder synchronization; do not assume Sync Library or cloud status.
 - Prefer simple, inspectable state and recovery from ordinary files and portable manifests.

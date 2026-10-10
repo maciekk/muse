@@ -59,7 +59,7 @@ class FakeAppleBridge:
             readable_properties=(
                 "library-identity",
                 "persistent-id",
-                "cloud-status",
+                "file-location",
             ),
             writable_properties=("managed-playlist-membership",),
         )
@@ -167,7 +167,6 @@ class FakeAppleBridge:
                 status="succeeded",
                 item_id=operation.item_id,
                 apple_persistent_id=persistent_id,
-                cloud_status="waiting",
             )
         raise AssertionError(f"validated unsupported operation: {operation.action}")
 

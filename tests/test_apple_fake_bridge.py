@@ -85,7 +85,7 @@ def test_fake_bridge_adds_track_and_returns_stable_persistent_id() -> None:
     outcome = result.operations[0]
     assert outcome.status == "succeeded"
     assert outcome.apple_persistent_id is not None
-    assert outcome.cloud_status == "waiting"
+    assert outcome.cloud_status is None
     assert fake.managed_items == {42: outcome.apple_persistent_id}
     assert result.library is not None
     assert result.library.total_tracks == 8

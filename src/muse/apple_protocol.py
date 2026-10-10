@@ -445,6 +445,8 @@ class OperationResult:
     status: OperationStatus
     item_id: int | None = None
     apple_persistent_id: str | None = None
+    # Retained in protocol v1 for compatibility with already exchanged probe
+    # documents. Subscription-free Finder sync does not populate this field.
     cloud_status: str | None = None
     error_code: str | None = None
     message: str | None = None

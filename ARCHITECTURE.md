@@ -65,8 +65,11 @@ mutation defaults to an uncertain outcome rather than blind repetition. The
 bridge currently advertises only library inspection and performs no Music.app
 writes. `muse apple-status REQUEST RESULT` validates a returned bundle against its
 originating request and renders the observation without persisting state or needing
-a live Mac connection. `mutation.rename_exact` uses each supported platform's
-exclusive rename primitive so bundle publication works on both Linux and macOS.
+a live Mac connection. Protocol-v1 results retain an optional `cloud_status` field
+for compatibility with the first exchanged documents, but the subscription-free
+Finder-sync workflow leaves it unset. Future publication verifies Music.app's local
+media copy instead. `mutation.rename_exact` uses each supported platform's exclusive
+rename primitive so bundle publication works on both Linux and macOS.
 
 The current implementation does not maintain a canonical beets catalogue, a
 disposable metadata index, or an operational Apple adapter. `doctor` still labels

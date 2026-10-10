@@ -67,7 +67,7 @@ def capabilities() -> BridgeCapabilities:
         bridge_version="0.1.0",
         supported_protocol_versions=(1,),
         supported_actions=("inspect-library", "add-track"),
-        readable_properties=("persistent-id", "cloud-status"),
+        readable_properties=("persistent-id", "file-location"),
         writable_properties=("title",),
     )
 
