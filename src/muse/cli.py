@@ -120,6 +120,11 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
         metavar="RESULT",
         help="returned result bundle; relative paths use the current directory",
     )
+    apple_status.add_argument(
+        "--record",
+        action="store_true",
+        help="retain the validated library observation in the durable Muse ledger",
+    )
     _add_json_argument(apple_status)
     apple_status.set_defaults(handler=_apple_status)
 

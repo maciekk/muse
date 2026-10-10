@@ -116,18 +116,24 @@ then validate and display it together with the originating request:
 ```bash
 muse apple-status /path/to/inspection-request /path/to/inspection-result
 muse apple-status /path/to/inspection-request /path/to/inspection-result --json
+muse apple-status /path/to/inspection-request /path/to/inspection-result --record
 ```
 
 `apple-status` verifies the exact bundle inventories, staged-file hashes where
 present, protocol version, batch and operation identities, and canonical request
-digest before reporting the observation. It is read-only and does not require a
-library root. Reapplying the same request on the Mac returns its journaled result
-without querying Music.app again. Bridge identity and operation outcomes are retained by
-default under the current macOS user's Application Support directory. Use
-`--state PATH` after `apply` only for testing or an intentionally separate bridge
-identity.
+digest before reporting the observation. By default it is read-only and does not
+require a library root. `--record` requires an existing library root and retains a
+successful library observation in `.muse/muse.db`; exact retries reuse the existing
+observation row, while later batches remain as history. It does not record a failed
+inspection or overwrite an earlier observation.
 
-This workflow requires no SSH and performs no Music.app writes. The managed
+Reapplying the same request on the Mac returns its journaled result without querying
+Music.app again. Bridge identity and operation outcomes are retained by default under
+the current macOS user's Application Support directory. Use `--state PATH` after
+`apply` only for testing or an intentionally separate bridge identity.
+
+This workflow requires no SSH and performs no Music.app writes. Optional `--record`
+changes only Muse's durable ledger. The managed
 playlists must not overlap: this initial probe reports the sum of their membership
 counts and rejects it if that sum exceeds the total Music.app track count.
 

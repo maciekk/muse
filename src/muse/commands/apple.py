@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 from dataclasses import asdict
 from pathlib import Path
 
+from muse import apple_ledger
 from muse.apple_exchange import import_result_bundle, load_request_bundle
 from muse.reporting import emit_json, human_number, make_console, print_table, status_text
 
@@ -14,7 +16,7 @@ def _external_path(value: str) -> Path:
     return Path(value).expanduser().absolute()
 
 
-def _apple_status(args: argparse.Namespace, _root: Path) -> int:
+def _apple_status(args: argparse.Namespace, root: Path) -> int:
     request_bundle = _external_path(args.request_bundle)
     result_bundle = _external_path(args.result_bundle)
     try:
@@ -25,6 +27,34 @@ def _apple_status(args: argparse.Namespace, _root: Path) -> int:
             f"[red]Apple status unavailable:[/red] {error}"
         )
         return 1
+
+    observation_id: int | None = None
+    state_created = False
+    if args.record:
+        try:
+            apple_ledger.validate_observation(request, result)
+        except ValueError as error:
+            make_console(args.color, stderr=True).print(
+                f"[red]Apple observation not recorded:[/red] {error}"
+            )
+            return 1
+        if not root.is_dir():
+            make_console(args.color, stderr=True).print(
+                f"[red]Apple observation not recorded:[/red] library root does not exist: {root}"
+            )
+            return 1
+        try:
+            state_directory = root / ".muse"
+            state_directory.mkdir(exist_ok=True)
+            with sqlite3.connect(state_directory / "muse.db") as connection:
+                recorded = apple_ledger.record_observation(connection, request, result)
+            observation_id = recorded.observation_id
+            state_created = recorded.created
+        except (OSError, sqlite3.Error, ValueError) as error:
+            make_console(args.color, stderr=True).print(
+                f"[red]Apple observation not recorded:[/red] {error}"
+            )
+            return 1
 
     report = {
         "request_bundle": str(request_bundle),
@@ -47,7 +77,8 @@ def _apple_status(args: argparse.Namespace, _root: Path) -> int:
             else None
         ),
         "operations": [asdict(item) for item in result.operations],
-        "state_created": False,
+        "observation_id": observation_id,
+        "state_created": state_created,
     }
     failed = any(item.status != "succeeded" for item in result.operations)
 
@@ -118,5 +149,16 @@ def _apple_status(args: argparse.Namespace, _root: Path) -> int:
             for operation in request.operations
         ],
     )
-    console.print("[dim]Validated request/result bundles; no Muse state was changed.[/dim]")
+    if args.record:
+        if state_created:
+            console.print(
+                "[green]Recorded Apple library observation "
+                f"{observation_id} in .muse/muse.db.[/green]"
+            )
+        else:
+            console.print(
+                f"[dim]Apple library observation {observation_id} was already recorded.[/dim]"
+            )
+    else:
+        console.print("[dim]Validated request/result bundles; no Muse state was changed.[/dim]")
     return 1 if failed else 0

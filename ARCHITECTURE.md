@@ -21,6 +21,7 @@ Rich.
 | SQLite hash cache schema and operations | `cache.py` |
 | Durable item identity and exact-version history | `ledger.py` |
 | Apple bridge documents and bundles | `apple_protocol.py`, `apple_exchange.py` |
+| Durable Apple library observations | `apple_ledger.py` |
 | Read-only Apple status, macOS bridge, and test double | `commands/apple.py`, `apple_macos_bridge.py`, `apple_fake_bridge.py` |
 | Recursive tree fingerprint encoding | `trees.py` |
 | Duplicate and tree comparison workflows | `duplicates.py`, `tree_diff.py` |
@@ -64,8 +65,11 @@ an interrupted read-only observation may run again, while any future interrupted
 mutation defaults to an uncertain outcome rather than blind repetition. The
 bridge currently advertises only library inspection and performs no Music.app
 writes. `muse apple-status REQUEST RESULT` validates a returned bundle against its
-originating request and renders the observation without persisting state or needing
-a live Mac connection. Protocol-v1 results retain an optional `cloud_status` field
+originating request and renders the observation without needing a live Mac connection.
+It remains read-only by default; `--record` stores a successful observation, bridge
+identity, and capabilities in the durable ledger. Recording is idempotent by batch and
+preserves later observations as history rather than replacing earlier generations.
+Protocol-v1 results retain an optional `cloud_status` field
 for compatibility with the first exchanged documents, but the subscription-free
 Finder-sync workflow leaves it unset. Future publication verifies Music.app's local
 media copy instead. `mutation.rename_exact` uses each supported platform's exclusive
@@ -82,7 +86,7 @@ projection.
 
 ## Derived data
 
-`.muse/muse.db` stores two distinct kinds of state. `file_hashes` contains path,
+`.muse/muse.db` stores three distinct kinds of state. `file_hashes` contains path,
 size, modification time, and SHA-256 for reusable vault hashes. `cache.py` owns its
 schema, lookup, pruning, and path relocation. Matching metadata permits cache reuse
 for duplicate reports, tree comparison, and thorough vault scanning; it is not
@@ -100,6 +104,13 @@ through the current importer are not silently adopted; `register` provides an
 explicit, fully validated and previewable bootstrap for them. `status` performs a
 read-only path comparison and reports unregistered Master audio and stale item
 paths without hashing or decoding files.
+
+`apple_library_observations` retains validated, successful Music.app inspections,
+including library and bridge identities, counts, capabilities, and observation time.
+A batch ID is immutable: an exact retry returns its existing row, while conflicting
+content is rejected. New batches append history so an unexpectedly empty or changed
+library cannot erase an earlier useful observation. Publication decisions, item
+mappings, and publication runs are not implemented yet.
 
 ## Content mutations and recovery
 

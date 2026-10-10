@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 
@@ -76,6 +77,80 @@ def test_apple_status_json_validates_and_reports_observation(tmp_path: Path, cap
     }
     assert report["operations"][0]["status"] == "succeeded"
     assert report["state_created"] is False
+
+
+def test_apple_status_records_observation_idempotently(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "vault"
+    root.mkdir()
+    request_bundle, result_bundle = make_bundles(tmp_path / "exchange")
+    arguments = [
+        "--root",
+        str(root),
+        "apple-status",
+        str(request_bundle),
+        str(result_bundle),
+        "--record",
+        "--json",
+    ]
+
+    assert main(arguments) == 0
+    first = json.loads(capsys.readouterr().out)
+    assert first["state_created"] is True
+    assert first["observation_id"] == 1
+
+    assert main(arguments) == 0
+    retry = json.loads(capsys.readouterr().out)
+    assert retry["state_created"] is False
+    assert retry["observation_id"] == 1
+
+    with sqlite3.connect(root / ".muse" / "muse.db") as connection:
+        row = connection.execute(
+            "SELECT library_identity, total_tracks, managed_tracks FROM apple_library_observations"
+        ).fetchone()
+    assert row == ("library-id", 66, 0)
+
+
+def test_apple_status_record_requires_existing_library_root(tmp_path: Path, capsys) -> None:
+    request_bundle, result_bundle = make_bundles(tmp_path / "exchange")
+    missing_root = tmp_path / "missing"
+
+    status = main(
+        [
+            "--root",
+            str(missing_root),
+            "apple-status",
+            str(request_bundle),
+            str(result_bundle),
+            "--record",
+        ]
+    )
+
+    assert status == 1
+    assert "library root does not exist" in capsys.readouterr().err
+    assert not missing_root.exists()
+
+
+def test_apple_status_does_not_create_state_for_failed_record(
+    tmp_path: Path, capsys
+) -> None:
+    root = tmp_path / "vault"
+    root.mkdir()
+    request_bundle, result_bundle = make_bundles(tmp_path / "exchange", failed=True)
+
+    status = main(
+        [
+            "--root",
+            str(root),
+            "apple-status",
+            str(request_bundle),
+            str(result_bundle),
+            "--record",
+        ]
+    )
+
+    assert status == 1
+    assert "no successful" in capsys.readouterr().err
+    assert not (root / ".muse").exists()
 
 
 def test_apple_status_human_output_uses_relative_external_paths(
