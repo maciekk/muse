@@ -103,14 +103,25 @@ def rename_exact(source: Path, destination: Path) -> None:
         raise ValueError(f"destination already exists: {destination}")
     if source.stat().st_dev != destination.parent.stat().st_dev:
         raise ValueError("rename crosses filesystems; use a verified copy")
-    rename_noreplace = ctypes.CDLL(None, use_errno=True).renameat2
-    result = rename_noreplace(
-        ctypes.c_int(-100),
-        ctypes.c_char_p(os.fsencode(source)),
-        ctypes.c_int(-100),
-        ctypes.c_char_p(os.fsencode(destination)),
-        ctypes.c_uint(1),
-    )
+    library = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(library, "renameat2", None)
+    renamex_np = getattr(library, "renamex_np", None)
+    if renameat2 is not None:
+        result = renameat2(
+            ctypes.c_int(-100),
+            ctypes.c_char_p(os.fsencode(source)),
+            ctypes.c_int(-100),
+            ctypes.c_char_p(os.fsencode(destination)),
+            ctypes.c_uint(1),  # RENAME_NOREPLACE
+        )
+    elif renamex_np is not None:
+        result = renamex_np(
+            ctypes.c_char_p(os.fsencode(source)),
+            ctypes.c_char_p(os.fsencode(destination)),
+            ctypes.c_uint(4),  # RENAME_EXCL on macOS
+        )
+    else:
+        raise OSError("this platform has no supported exclusive rename operation")
     if result != 0:
         error = ctypes.get_errno()
         if error == 17:

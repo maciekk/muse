@@ -131,6 +131,31 @@ def test_import_recovers_after_cache_reconciliation_failure(tmp_path: Path, monk
     assert paths == [(str(destination),)]
 
 
+def test_exclusive_rename_uses_macos_primitive_when_renameat2_is_absent(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.write_text("content")
+
+    class MacLibrary:
+        @staticmethod
+        def renamex_np(source_name, destination_name, flags):
+            assert flags.value == 4
+            mutation.os.rename(
+                mutation.os.fsdecode(source_name.value),
+                mutation.os.fsdecode(destination_name.value),
+            )
+            return 0
+
+    monkeypatch.setattr(mutation.ctypes, "CDLL", lambda *_args, **_kwargs: MacLibrary())
+
+    mutation.rename_exact(source, destination)
+
+    assert not source.exists()
+    assert destination.read_text() == "content"
+
+
 def test_atomic_json_failure_preserves_previous_record(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "plan.json"
     mutation.atomic_json(path, {"state": "ready"})

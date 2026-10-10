@@ -413,11 +413,16 @@ class AppleLibraryObservation:
     name: str | None
     total_tracks: int
     managed_tracks: int
+    application_version: str | None = None
 
     @classmethod
     def from_dict(cls, raw: Any, field: str = "library") -> AppleLibraryObservation:
         value = _mapping(raw, field)
-        _keys(value, field, {"identity", "name", "total_tracks", "managed_tracks"})
+        _keys(
+            value,
+            field,
+            {"identity", "name", "total_tracks", "managed_tracks", "application_version"},
+        )
         total = _integer(value["total_tracks"], f"{field}.total_tracks")
         managed = _integer(value["managed_tracks"], f"{field}.managed_tracks")
         assert total is not None and managed is not None
@@ -428,6 +433,9 @@ class AppleLibraryObservation:
             name=_string(value["name"], f"{field}.name", optional=True),
             total_tracks=total,
             managed_tracks=managed,
+            application_version=_string(
+                value["application_version"], f"{field}.application_version", optional=True
+            ),
         )
 
 

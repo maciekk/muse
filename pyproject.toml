@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 muse = "muse.cli:main"
+muse-apple-bridge = "muse.apple_macos_bridge:main"
 
 [dependency-groups]
 dev = [

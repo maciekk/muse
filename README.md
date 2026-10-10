@@ -91,6 +91,35 @@ review, not a claim that an album is complete or an audio integrity check; use `
 to decode the files. `info` is read-only and returns an error status only for unreadable
 files, traversal errors, or an empty target.
 
+### Probe Music.app through a manual bundle
+
+The initial macOS bridge is a separate read-only helper. It does not yet publish
+music or update Muse's ledger. Create a fresh inspection request on either host:
+
+```bash
+muse-apple-bridge prepare-inspection /path/to/inspection-request
+```
+
+Copy that whole directory to a logged-in Mac on which Muse is installed, then run:
+
+```bash
+muse-apple-bridge apply /path/to/inspection-request /path/to/inspection-result
+```
+
+The helper uses `osascript` to read Music.app's version, library identity and name,
+total track count, and the combined size of the `Muse — Master` and
+`Muse — Stopgap` playlists. macOS may ask for Automation permission. The result is
+written as `inspection-result/result.json`; copy the result directory back intact
+for inspection. Reapplying the same request returns its journaled result without
+querying Music.app again. Bridge identity and operation outcomes are retained by
+default under the current macOS user's Application Support directory. Use
+`--state PATH` after `apply` only for testing or an intentionally separate bridge
+identity.
+
+This workflow requires no SSH and performs no Music.app writes. The managed
+playlists must not overlap: this initial probe reports the sum of their membership
+counts and rejects it if that sum exceeds the total Music.app track count.
+
 ### Upgrade embedded album artwork
 
 ```bash

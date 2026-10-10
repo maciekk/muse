@@ -20,7 +20,8 @@ Rich.
 | Fresh SHA-256 and file identity | `hashing.py` |
 | SQLite hash cache schema and operations | `cache.py` |
 | Durable item identity and exact-version history | `ledger.py` |
-| Apple bridge documents, bundles, and test double | `apple_protocol.py`, `apple_exchange.py`, `apple_fake_bridge.py` |
+| Apple bridge documents and bundles | `apple_protocol.py`, `apple_exchange.py` |
+| Read-only macOS bridge and test double | `apple_macos_bridge.py`, `apple_fake_bridge.py` |
 | Recursive tree fingerprint encoding | `trees.py` |
 | Duplicate and tree comparison workflows | `duplicates.py`, `tree_diff.py` |
 | External scan and backlog pull | `scanning.py` |
@@ -52,7 +53,18 @@ accepts verified identical retries, accounts for the exact bundle inventory, and
 verifies every staged file against its declared size and SHA-256. Result import
 requires the batch ID and canonical request digest to match the supplied request,
 so copied results cannot be attached to a different publication plan. These APIs
-do not yet expose a command or choose a transport.
+do not choose a transport.
+
+`muse-apple-bridge` can create a fresh inspection request and apply it locally on
+macOS. The bridge uses read-only AppleScript calls, reports Music.app and managed
+playlist observations, and writes a correlated result bundle. Its local SQLite
+journal retains a stable bridge ID, immutable batch identities, per-operation
+outcomes, and successful observations. Exact retries return the recorded result;
+an interrupted read-only observation may run again, while any future interrupted
+mutation defaults to an uncertain outcome rather than blind repetition. The
+bridge currently advertises only library inspection and performs no Music.app
+writes. `mutation.rename_exact` uses each supported platform's exclusive rename
+primitive so bundle publication works on both Linux and macOS.
 
 The current implementation does not maintain a canonical beets catalogue, a
 disposable metadata index, or an operational Apple adapter. `doctor` still labels
