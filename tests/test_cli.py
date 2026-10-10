@@ -52,6 +52,7 @@ def test_every_command_help_starts_with_a_summary(capsys) -> None:
         "info": "Show album tracks, metadata, and possible gaps.",
         "scan": "Check whether an external tree contains files absent from the vault.",
         "check": "Fully decode audio files to find playback errors.",
+        "play": "Play audio locally with mpv.",
         "search": "Find files or directories by name across the vault.",
         "dupes": "Find byte-identical files; names and locations need not match.",
         "prune": "Remove missing files from the hash cache.",

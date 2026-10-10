@@ -75,6 +75,7 @@ def _doctor(args: argparse.Namespace, root: Path) -> int:
         ("beet", "canonical catalogue"),
         ("ffmpeg", "audio validation and conversion"),
         ("ffprobe", "technical inspection"),
+        ("mpv", "local audio playback"),
     ):
         executable = shutil.which(name)
         tools.append(

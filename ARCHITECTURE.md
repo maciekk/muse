@@ -24,6 +24,7 @@ Rich.
 | Duplicate and tree comparison workflows | `duplicates.py`, `tree_diff.py` |
 | External scan and backlog pull | `scanning.py` |
 | Media inspection and deterministic tag/artwork repair | `media.py`, `media_fixup.py` |
+| Stateless local playback through mpv | `commands/play.py` |
 | Existing-Master identity bootstrap | `registration.py` |
 | Import, compaction, move, and artifact workflows | `importing.py`, `compaction.py`, `moves.py`, `slag.py` |
 | Shared mutation mechanics | `mutation.py` |
@@ -32,6 +33,8 @@ The common modules provide mechanics; each workflow retains its own selection,
 exclusion, destination, and recovery policy. `filesystem.walk` reports errors and
 does not follow descendant directory symlinks. `trees.fingerprints` includes empty
 directories in the digest and is shared by duplicate discovery and verification.
+Local `play` is an interactive, stateless delegation to the optional `mpv` executable;
+it does not participate in the durable item ledger or Apple behavioural state.
 
 The current implementation does not maintain a canonical beets catalogue, a
 disposable metadata index, or an Apple adapter. `doctor` still labels the optional

@@ -64,7 +64,11 @@ muse info backlog/old-album --all # include full metadata for each track
 muse info backlog/old-album --json
 muse check backlog          # fully decode audio recursively to find playback errors
 muse check /media/old-drive/track.flac --json
+muse play master/artists/Artist/Album/song.flac # play one track locally with mpv
+muse play backlog/album     # play recognized audio recursively as a playlist
 ```
+
+`play` accepts one or more audio files or directories. Relative targets are resolved beneath the library root. Directories are expanded recursively in deterministic path order without following symlinks, duplicate selections are played once, and non-audio files are skipped. Muse prints the number of selected audio files with a one-line playback-control reminder and runs `mpv` interactively with cover-art display disabled. It disables mpv's automatic playlist creation so the playlist contains exactly Muse's selected files. Routine mpv messages are replaced by one updating status line showing the selection position and count, title, elapsed time, and duration; warnings and errors remain visible. Muse returns mpv's exit status. `mpv` is an optional external dependency; playback does not create Muse state or record listening behaviour.
 
 `status` compares audio paths in `master/` with the durable item ledger without reading audio contents or creating state. It reports unregistered Master files and suggests `muse register`; it also warns about registered item paths that are no longer present.
 

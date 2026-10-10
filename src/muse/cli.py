@@ -17,6 +17,7 @@ from muse.commands.content import _import, _move, _slag
 from muse.commands.duplicates import _diff, _dupes, _prune
 from muse.commands.info import _info
 from muse.commands.overview import _doctor, _search, _stats, _status
+from muse.commands.play import _play
 from muse.commands.register import _register
 from muse.commands.scan import _scan
 from muse.config import resolve_root
@@ -151,6 +152,15 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     check.add_argument("target", help="audio file or directory to check recursively")
     _add_json_argument(check)
     check.set_defaults(handler=_check_audio)
+
+    play = command("play", "play audio locally with mpv")
+    play.add_argument(
+        "targets",
+        nargs="+",
+        metavar="PATH",
+        help="audio files or directories; relative paths are beneath the library root",
+    )
+    play.set_defaults(handler=_play)
 
     fix_art = command("fix-art", "find and embed better album artwork")
     fix_art.add_argument(
