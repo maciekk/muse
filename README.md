@@ -57,6 +57,9 @@ muse status                 # show top-level repository status
 muse stats                  # count files and disk usage
 muse stats backlog          # inspect one path beneath the root
 muse stats --json           # emit structured output
+muse info backlog/old-album # review songs, tags, artwork, and numbering gaps
+muse info backlog/old-album --all # include full metadata for each track
+muse info backlog/old-album --json
 muse check backlog          # fully decode audio recursively to find playback errors
 muse check /media/old-drive/track.flac --json
 ```
@@ -69,6 +72,16 @@ files and symlinks, lists failures, and exits with status 1 if a file fails or t
 has an error. A duration difference greater than both 5 seconds and 5% is reported as
 a failure. A successful decode cannot prove that all intended audio is present in
 formats without an embedded checksum or trustworthy original to compare against.
+
+`info` accepts an album directory (including disc subdirectories) or one audio file.
+Relative targets are resolved beneath the library root. The default table lists every
+readable track on one line, with its title, artist, duration, and missing metadata.
+Use `--all` to include audio properties, all text tags, and embedded artwork details
+for each track. JSON always includes the full report. The review highlights missing core
+metadata, numbering gaps or duplicates, and inconsistent album-level tags. These are cues for a manual
+review, not a claim that an album is complete or an audio integrity check; use `check`
+to decode the files. `info` is read-only and returns an error status only for unreadable
+files, traversal errors, or an empty target.
 
 ### Upgrade embedded album artwork
 

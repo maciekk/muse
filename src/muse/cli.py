@@ -15,6 +15,7 @@ from muse.commands.check import _check_audio
 from muse.commands.compact import _compact
 from muse.commands.content import _import, _move, _slag
 from muse.commands.duplicates import _diff, _dupes, _prune
+from muse.commands.info import _info
 from muse.commands.overview import _doctor, _search, _stats, _status
 from muse.commands.scan import _scan
 from muse.config import resolve_root
@@ -111,6 +112,12 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     )
     _add_json_argument(stats)
     stats.set_defaults(handler=_stats)
+
+    info = command("info", "show album tracks, metadata, and possible gaps")
+    info.add_argument("target", help="album directory or audio file; relative to the library root")
+    info.add_argument("--all", action="store_true", help="show full metadata for every track")
+    _add_json_argument(info)
+    info.set_defaults(handler=_info)
 
     scan = command("scan", "check whether an external tree contains files absent from the vault")
     scan.add_argument("target", help="external file or directory to inspect")
