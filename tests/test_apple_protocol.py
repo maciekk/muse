@@ -206,6 +206,41 @@ def test_result_rejects_unexplained_failure_and_mismatched_request() -> None:
         validate_result(request, replace(result, request_sha256="0" * 64))
 
 
+def test_result_requires_reported_protocol_and_action_capabilities() -> None:
+    request = add_request()
+    result = AppleResult(
+        batch_id=request.batch_id,
+        request_sha256=request.sha256,
+        bridge_id="55555555-5555-4555-8555-555555555555",
+        observed_at="2026-03-20T10:02:00+00:00",
+        capabilities=replace(
+            capabilities(),
+            supported_actions=("inspect-library",),
+        ),
+        library=None,
+        operations=(
+            OperationResult(
+                operation_id=request.operations[0].operation_id,
+                status="succeeded",
+                item_id=42,
+                apple_persistent_id="ABCDEF1234567890",
+            ),
+        ),
+    )
+    with pytest.raises(ProtocolValidationError, match="does not report supporting"):
+        validate_result(request, result)
+
+    incompatible = replace(
+        result,
+        capabilities=replace(
+            capabilities(),
+            supported_protocol_versions=(2,),
+        ),
+    )
+    with pytest.raises(ProtocolValidationError, match="request protocol"):
+        validate_result(request, incompatible)
+
+
 def test_result_requires_persistent_id_after_successful_add() -> None:
     request = add_request()
     result = AppleResult(

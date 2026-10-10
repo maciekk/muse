@@ -561,6 +561,8 @@ def validate_result(request: AppleRequest, result: AppleResult) -> None:
         raise _error("result.batch_id", "does not match request")
     if result.request_sha256 != request.sha256:
         raise _error("result.request_sha256", "does not match request content")
+    if request.protocol_version not in result.capabilities.supported_protocol_versions:
+        raise _error("result.capabilities", "does not report support for the request protocol")
     requested = {item.operation_id: item for item in request.operations}
     returned = {item.operation_id: item for item in result.operations}
     missing = sorted(set(requested) - set(returned))
@@ -577,6 +579,14 @@ def validate_result(request: AppleRequest, result: AppleResult) -> None:
         if outcome.item_id != operation.item_id:
             raise _error(
                 f"result.operations[{operation_id}].item_id", "does not match request"
+            )
+        if (
+            outcome.status == "succeeded"
+            and operation.action not in result.capabilities.supported_actions
+        ):
+            raise _error(
+                f"result.operations[{operation_id}].status",
+                "succeeded for an action the bridge does not report supporting",
             )
         if (
             operation.action == "inspect-library"

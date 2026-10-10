@@ -20,7 +20,7 @@ Rich.
 | Fresh SHA-256 and file identity | `hashing.py` |
 | SQLite hash cache schema and operations | `cache.py` |
 | Durable item identity and exact-version history | `ledger.py` |
-| Apple bridge documents and test double | `apple_protocol.py`, `apple_fake_bridge.py` |
+| Apple bridge documents, bundles, and test double | `apple_protocol.py`, `apple_exchange.py`, `apple_fake_bridge.py` |
 | Recursive tree fingerprint encoding | `trees.py` |
 | Duplicate and tree comparison workflows | `duplicates.py`, `tree_diff.py` |
 | External scan and backlog pull | `scanning.py` |
@@ -47,6 +47,12 @@ provides an in-process test double with batch and operation journals, determinis
 Apple IDs, injected failure and uncertainty outcomes, and interruption simulation.
 It lets later export, import, and planning work exercise duplicate-safe retries
 without macOS or Music.app; its journal is intentionally not persistent.
+`apple_exchange.py` publishes request and result directories by staged rename,
+accepts verified identical retries, accounts for the exact bundle inventory, and
+verifies every staged file against its declared size and SHA-256. Result import
+requires the batch ID and canonical request digest to match the supplied request,
+so copied results cannot be attached to a different publication plan. These APIs
+do not yet expose a command or choose a transport.
 
 The current implementation does not maintain a canonical beets catalogue, a
 disposable metadata index, or an operational Apple adapter. `doctor` still labels
