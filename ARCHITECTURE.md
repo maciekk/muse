@@ -20,6 +20,7 @@ Rich.
 | Fresh SHA-256 and file identity | `hashing.py` |
 | SQLite hash cache schema and operations | `cache.py` |
 | Durable item identity and exact-version history | `ledger.py` |
+| Transport-independent Apple bridge documents | `apple_protocol.py` |
 | Recursive tree fingerprint encoding | `trees.py` |
 | Duplicate and tree comparison workflows | `duplicates.py`, `tree_diff.py` |
 | External scan and backlog pull | `scanning.py` |
@@ -36,9 +37,17 @@ directories in the digest and is shared by duplicate discovery and verification.
 Local `play` is an interactive, stateless delegation to the optional `mpv` executable;
 it does not participate in the durable item ledger or Apple behavioural state.
 
+`apple_protocol.py` defines and validates the first version of the proposed Apple
+bridge request/result documents. Requests use UUID batch and operation identities,
+bind staged files by size and SHA-256, and carry only managed playlist requests.
+Results bind to the canonical request digest, report capabilities and explicit
+success, failure, or uncertainty, and must correlate exactly before acceptance.
+The documents do not assume SSH or any other transport.
+
 The current implementation does not maintain a canonical beets catalogue, a
-disposable metadata index, or an Apple adapter. `doctor` still labels the optional
-`beet` executable as a canonical-catalogue tool; that label is legacy design residue
+disposable metadata index, or an operational Apple adapter. `doctor` still labels
+the optional `beet` executable as a canonical-catalogue tool; that label is legacy
+design residue
 rather than an implemented integration. The accepted future direction in
 `DESIGN.md` makes embedded file metadata authoritative, treats beets and Picard as
 optional preparation helpers, and keeps Apple publication as a replaceable
