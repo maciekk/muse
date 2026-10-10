@@ -10,7 +10,7 @@ from functools import partial
 from rich_argparse import RichHelpFormatter
 
 from muse import __version__
-from muse.commands.apple import _apple_status
+from muse.commands.apple import _apple_status, _publish_apple
 from muse.commands.art import _fix_art
 from muse.commands.check import _check_audio
 from muse.commands.compact import _compact
@@ -127,6 +127,38 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     )
     _add_json_argument(apple_status)
     apple_status.set_defaults(handler=_apple_status)
+
+    publish_apple = command(
+        "publish-apple", "plan and export selected Master music for Music.app"
+    )
+    publish_apple.add_argument(
+        "target",
+        nargs="?",
+        metavar="PATH",
+        help="Master file or directory; relative paths are beneath the library root",
+    )
+    publish_apple.add_argument(
+        "--apply",
+        action="store_true",
+        help="stage and export the current publication plan",
+    )
+    publish_apple.add_argument(
+        "--result",
+        metavar="RESULT",
+        help="record a returned result bundle for the current exported plan",
+    )
+    publish_apple.add_argument(
+        "--exclude",
+        action="store_true",
+        help="plan an explicit exclusion instead of publication",
+    )
+    publish_apple.add_argument(
+        "--include-excluded",
+        action="store_true",
+        help="deliberately replace explicit exclusions within the selected path",
+    )
+    _add_json_argument(publish_apple)
+    publish_apple.set_defaults(handler=_publish_apple)
 
     stats = command("stats", "report file counts and disk usage")
     stats.add_argument(

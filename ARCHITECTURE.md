@@ -22,7 +22,8 @@ Rich.
 | Durable item identity and exact-version history | `ledger.py` |
 | Apple bridge documents and bundles | `apple_protocol.py`, `apple_exchange.py` |
 | Durable Apple observations and publication state | `apple_ledger.py` |
-| Read-only Apple status, macOS bridge, and test double | `commands/apple.py`, `apple_macos_bridge.py`, `apple_fake_bridge.py` |
+| Apple selection, staging, and disconnected publication plans | `apple_publication.py` |
+| Apple commands, read-only macOS bridge, and test double | `commands/apple.py`, `apple_macos_bridge.py`, `apple_fake_bridge.py` |
 | Recursive tree fingerprint encoding | `trees.py` |
 | Duplicate and tree comparison workflows | `duplicates.py`, `tree_diff.py` |
 | External scan and backlog pull | `scanning.py` |
@@ -119,8 +120,20 @@ Only explicitly included items at their current source version can enter a run, 
 lifecycle area determines the required managed playlist. Successful results establish
 an `apple_item_mappings` row keyed by durable item identity and scoped to the observed
 Music.app library. A new mapping starts with local-copy verification false because the
-protocol does not yet report Music.app's managed-media location. The publication
-planner and user-facing selection commands are not implemented yet.
+protocol does not yet report Music.app's managed-media location.
+
+`apple_publication.py` owns the sole current `.muse/apple-publication-plan.json`.
+Planning accepts registered Master items only, freshly verifies their admitted hashes
+and metadata, skips current mappings, and preserves explicit exclusions during broad
+selection. Apply records inclusion decisions, creates independent staging media, copies
+Music-compatible MP3/M4A sources, converts other importer-supported formats to ALAC,
+and exports the existing request-bundle format beneath `.muse/apple-exchange/`. Exact
+apply retries verify and reuse that bundle. Returned results are correlated with the
+exported request and recorded through `apple_ledger`; uncertain outcomes remain current
+for reconciliation. Request and staging media remain available because protocol v1
+cannot establish Music.app local-copy verification. The macOS bridge still advertises
+only inspection and performs no Music.app writes, so real add-track publication remains
+the next canary step.
 
 ## Content mutations and recovery
 
@@ -151,6 +164,11 @@ plans and decide how to resume from verified filesystem state.
   Slag copies are verified before publication, then their sources are removed.
 - Scan pull stages selected source directories beside the destination in
   `backlog/` and publishes the completed copy by renaming the staging directory.
+- Apple publication keeps one current manifest-backed plan. Apply reverifies source
+  bytes and metadata before staging or conversion, persists its immutable publication
+  run before bundle export, and can recover an interrupted export from the stable batch
+  and operation IDs. Result import archives only wholly successful runs; failures and
+  uncertain outcomes remain inspectable in the current plan.
 
 The filesystem and SQLite cache do not share a transaction. Recovery therefore
 checks actual source and destination state and repeats cache reconciliation;

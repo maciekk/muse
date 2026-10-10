@@ -57,6 +57,7 @@ These commands are read-only and do not create Muse state.
 muse doctor                 # inspect layout and supporting tools
 muse status                 # show top-level repository status
 muse apple-status REQUEST RESULT # validate a returned Music.app observation
+muse publish-apple master/artists/Artist/Album # preview disconnected publication
 muse stats                  # count files and disk usage
 muse stats backlog          # inspect one path beneath the root
 muse stats --json           # emit structured output
@@ -136,6 +137,40 @@ This workflow requires no SSH and performs no Music.app writes. Optional `--reco
 changes only Muse's durable ledger. The managed
 playlists must not overlap: this initial probe reports the sum of their membership
 counts and rejects it if that sum exceeds the total Music.app track count.
+
+### Plan a disconnected Apple publication
+
+The Omarchy-side publication planner works with registered Master items:
+
+```bash
+muse publish-apple master/artists/Artist/Album # inspect and preview an opt-in selection
+muse publish-apple --apply                    # stage media and export the request bundle
+muse publish-apple --result /path/to/result   # validate and record the returned result
+
+muse publish-apple master/courses --exclude          # preview an explicit exclusion
+muse publish-apple --apply                           # record the exclusion
+muse publish-apple master/courses --include-excluded # deliberately replace it later
+```
+
+Planning freshly hashes and fully inspects every selected source. Unregistered Master
+files, changed admitted versions, and stale existing mappings block publication.
+Explicit exclusions survive broader selections unless `--include-excluded` is supplied
+for a deliberate override. Applying an inclusion plan records the decisions, creates
+independent staging files, copies MP3 and M4A directly, converts other accepted formats
+to ALAC with FFmpeg, and exports a self-contained request beneath
+`.muse/apple-exchange/`. The command prints the exact bundle path for manual transfer.
+Applying the same exported plan again verifies and reuses its bundle.
+
+After the Mac returns a correlated result bundle, `--result` retains every success,
+failure, or uncertain outcome and creates mappings only for successful imports. An
+uncertain result remains current for reconciliation instead of being retried blindly.
+Request and staging media are intentionally retained because protocol version 1 cannot
+yet prove that Music.app copied an import into its managed media directory.
+
+The installed macOS bridge remains read-only at this stage: it can validate an exported
+add-track request and return an unsupported-operation failure, but it does not yet write
+to Music.app. Publication planning and result handling can be exercised end to end with
+the fake bridge while the Music.app add-track canary is implemented.
 
 ### Upgrade embedded album artwork
 

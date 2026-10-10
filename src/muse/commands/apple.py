@@ -7,13 +7,99 @@ import sqlite3
 from dataclasses import asdict
 from pathlib import Path
 
-from muse import apple_ledger
+from muse import apple_ledger, apple_publication
 from muse.apple_exchange import import_result_bundle, load_request_bundle
 from muse.reporting import emit_json, human_number, make_console, print_table, status_text
 
 
 def _external_path(value: str) -> Path:
     return Path(value).expanduser().absolute()
+
+
+def _publication_report(plan: apple_publication.PublicationPlan) -> dict[str, object]:
+    return {
+        "batch_id": plan.batch_id,
+        "target": plan.target,
+        "mode": plan.mode,
+        "state": plan.state,
+        "created_at": plan.created_at,
+        "items": [asdict(item) for item in plan.items],
+        "excluded_paths": list(plan.excluded_paths),
+        "already_published_paths": list(plan.already_published_paths),
+        "request_bundle": plan.request_bundle,
+    }
+
+
+def _publish_apple(args: argparse.Namespace, root: Path) -> int:
+    try:
+        if args.result is not None:
+            if args.target is not None or args.apply or args.exclude or args.include_excluded:
+                raise ValueError("--result cannot be combined with a target or planning options")
+            plan = apple_publication.record_result(root, _external_path(args.result))
+        elif args.apply:
+            if args.target is not None or args.exclude or args.include_excluded:
+                raise ValueError("--apply resumes the current plan and accepts no target")
+            plan = apple_publication.apply_plan(root)
+        else:
+            if args.target is None:
+                if args.exclude or args.include_excluded:
+                    raise ValueError("planning options require a Master target")
+                plan = apple_publication.load_plan(root)
+            else:
+                target = Path(args.target).expanduser()
+                target = (
+                    (root / target).absolute() if not target.is_absolute() else target.absolute()
+                )
+                plan = apple_publication.make_plan(
+                    root,
+                    target,
+                    exclude=args.exclude,
+                    include_excluded=args.include_excluded,
+                )
+    except (OSError, sqlite3.Error, ValueError) as error:
+        make_console(args.color, stderr=True).print(
+            f"[red]Apple publication unavailable:[/red] {error}"
+        )
+        return 1
+
+    report = _publication_report(plan)
+    if args.json:
+        emit_json(report)
+        return 0
+
+    console = make_console(args.color)
+    heading = "Apple publication exclusion" if plan.mode == "exclude" else "Apple publication"
+    console.print(f"[bold]{heading}[/bold]")
+    console.print("[dim]Target[/dim]", plan.target)
+    console.print("[dim]State[/dim]", plan.state)
+    console.print("[dim]Selected items[/dim]", human_number(len(plan.items)))
+    if plan.excluded_paths:
+        console.print(
+            f"[yellow]{len(plan.excluded_paths)} explicitly excluded item(s) "
+            "were preserved.[/yellow]"
+        )
+    if plan.already_published_paths:
+        console.print(
+            f"[dim]{len(plan.already_published_paths)} current item(s) are already published.[/dim]"
+        )
+    if plan.request_bundle is not None:
+        console.print("[green]Request bundle[/green]", plan.request_bundle)
+        console.print(
+            "[dim]Copy this directory to the Mac and apply it with "
+            "muse-apple-bridge.[/dim]"
+        )
+    elif plan.state == "ready":
+        console.print("[dim]Preview only; run muse publish-apple --apply to continue.[/dim]")
+    elif plan.state == "completed":
+        console.print("[green]Apple publication state recorded.[/green]")
+    elif plan.state == "uncertain":
+        console.print(
+            "[yellow]A bridge outcome is uncertain; retained artifacts require "
+            "reconciliation.[/yellow]"
+        )
+    elif plan.state == "failed":
+        console.print("[red]The bridge rejected at least one publication operation.[/red]")
+    return 0
 
 
 def _apple_status(args: argparse.Namespace, root: Path) -> int:
