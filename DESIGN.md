@@ -26,6 +26,42 @@ phases.
 - Keep the command vocabulary small. Related operations should share a memorable verb so users can discover precise variants without recalling a large set of similar or specialized verbs.
 - Keep positional arguments unambiguous. For operational commands, every positional argument after the command names a filesystem path or path-like repository identifier; operation variants belong in dashed command names, not subcommands.
 
+## Authority, portability, and derived state
+
+The music files are the product. Canonical files in `master/` should be self-contained and useful without Muse: audio, intrinsic metadata, primary artwork, and portable public identifiers belong in the files whenever their formats support them. Paths remain human-readable, and useful release-level material that does not belong in an audio tag remains beside the release. Muse must not require a private catalogue to explain what a file is.
+
+Each fact has one authority:
+
+- files and embedded tags own canonical audio and intrinsic metadata;
+- the filesystem owns current organization;
+- durable Muse state owns provenance, workflow decisions, integrity history, lifecycle dates, and external-system relationships;
+- Apple owns live favourites, ratings, play and skip counts, listening history, and personal playlists;
+- disposable indexes and snapshots are explicitly non-authoritative.
+
+Muse should eventually separate state by durability rather than by every domain. `.muse/muse.db` is the backed-up operational ledger; a disposable `.muse/cache.db` may hold parsed tags, technical properties, full-text indexes, and other rebuildable query accelerators. Do not create separate durable databases for provenance, publication, and operations: changes spanning those concerns should remain transactional. Portable audit records and manifests support inspection and recovery without becoming additional live authorities.
+
+Ordinary queries may use cached metadata rather than rereading every file. Muse-controlled changes refresh affected cache entries, an explicit incremental index refresh detects external edits using filesystem metadata as a staleness hint, and correctness-critical mutation or publication rereads the selected files. If a cache disagrees with a file, the file wins.
+
+SHA-256 covers the complete file and belongs in durable state because it identifies exact file versions, supports exact deduplication, and establishes integrity baselines. It is not the enduring identity of a track: tag or artwork changes create a new file version while the same internal Muse item and Apple mapping continue. Muse should record intentional old-to-new hash transitions and conservatively review unexplained changes. Do not add decoded-audio hashes or acoustic identity to the initial design.
+
+Muse uses small internal row IDs to preserve operational continuity through moves, metadata repairs, and Stopgap promotion. These IDs are not embedded in tags or filenames and are not a second metadata catalogue. Losing `muse.db` should create administrative recovery work, not make the collection unplayable or unintelligible.
+
+## Metadata preparation boundary
+
+Metadata enrichment is a replaceable workshop step before canonical admission. Beets, MusicBrainz Picard, or any ordinary tag editor may operate on an independent working copy. The interoperability contract is the filesystem: Muse prepares normal files, the helper edits their tags and artwork, and Muse independently shows a normalized before/after report, decodes and validates the result, hashes it, and controls admission into `master/`.
+
+A helper's private database and match history are neither Muse dependencies nor sources of truth. Initial integration should be documentation and optional launch commands, not a plugin framework. Beets is useful for batch MusicBrainz matching; Picard is useful for visual work on individual or difficult releases. Helpers must not independently administer `master/`. Historical backlog sources should be copied into the mutable `incoming/` work area before external editing; accepting prepared sources from `incoming/` is therefore an explicit future importer requirement.
+
+## Apple projection and behavioural state
+
+Apple is a replaceable listening and distribution surface. Muse publishes independent staging copies through a macOS bridge using supported Music.app automation, captures Apple persistent IDs, and maintains separate `Muse — Master` and `Muse — Stopgap` playlists. Unsupported formats may be converted only in staging; there is no permanent published tree and Apple never operates directly on canonical files.
+
+The durable relationship is `Muse item ID ↔ Apple persistent ID`; source SHA-256 values identify published versions but do not define item identity. Canonical metadata flows from files to Apple. A metadata-only file rewrite updates the existing Apple entry and does not remap it; an Apple mapping changes only when the Apple entry itself is replaced.
+
+Apple remains authoritative for live behavioural state. Muse may periodically import timestamped, read-only snapshots of favourites, ratings, play and skip counts, and related dates for local queries and explicit disaster recovery. Routine synchronization never merges or writes this state back. A recovery operation may, after preview and capability testing, reseed supported fields into a rebuilt Apple library. Snapshot ingestion must detect a changed or unexpectedly empty Apple library and preserve previous generations rather than overwriting useful recovery data. Apple's incidental `date added` is not a preservation goal; Muse records meaningful lifecycle dates such as first seen, admitted to Stopgap or Master, first published, and last verified.
+
+Playlist membership distinguishes Master and Stopgap while browsing. iPhone Now Playing does not reliably expose that membership; any future title or artwork marker would be a deliberate Apple-presentation policy exception, not canonical metadata.
+
 ## Repository areas
 
 The intended repository roles are:
@@ -459,13 +495,13 @@ Likely repair concerns include:
 - filenames and directory layout that no longer follow convention;
 - stale release-adjacent files that should be preserved in slag;
 - format or album-coherence findings introduced by newer validation policy;
-- cache, catalogue, and published-library references affected by changed bytes or paths.
+- cache, durable operational, and published-library references affected by changed bytes or paths.
 
 Policy-driven changes must be distinguishable from subjective editorial choices. Muse may safely normalize a value only when the desired result is deterministic from configured policy and verified source facts. Ambiguous artist credits, editions, dates, artwork selection, and similar decisions remain explicit questions or blockers. A newer convention must not silently rewrite the entire library merely because it can.
 
 A fix plan should record the policy and schema versions used, observed content identities, proposed replacements and moves, user decisions, warnings, and expected before/after states. Re-running inspection after policy or content changes must mark stale conclusions rather than treating an old audit as proof of current compliance. A successful plan becomes audit history, as with import.
 
-Repairs that change file bytes require stronger handling than ordinary moves. Tag or embedded-artwork rewriting should create a temporary sibling, fully validate and decode the replacement, verify the intended metadata, and only then perform a recoverable replacement. The original file must move to the operation's trash receipt rather than be overwritten or unlinked. Renames and layout changes must reject collisions, account for case-insensitive filesystems, preserve hash-cache knowledge where valid, and update dependent catalogue state transactionally or leave the plan blocked. External artwork and other potentially useful source material must remain represented in `master/`, `slag/`, or `trash/`.
+Repairs that change file bytes require stronger handling than ordinary moves. Tag or embedded-artwork rewriting should create a temporary sibling, fully validate and decode the replacement, verify the intended metadata, and only then perform a recoverable replacement. The original file must move to the operation's trash receipt rather than be overwritten or unlinked. Renames and layout changes must reject collisions, account for case-insensitive filesystems, preserve hash-cache knowledge where valid, and update dependent operational state transactionally or leave the plan blocked. External artwork and other potentially useful source material must remain represented in `master/`, `slag/`, or `trash/`.
 
 `fix` is not a promise to reconstruct damaged audio without a trustworthy source, nor should routine metadata cleanup implicitly transcode recordings. Integrity failures, uncertain mappings, and lossy transformations block by default and explain what source or decision is required. The operation must preserve the same preview, explicit apply, locking, recovery, idempotence, and no-unrepresented-content guarantees as import.
 

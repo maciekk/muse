@@ -31,6 +31,14 @@ exclusion, destination, and recovery policy. `filesystem.walk` reports errors an
 does not follow descendant directory symlinks. `trees.fingerprints` includes empty
 directories in the digest and is shared by duplicate discovery and verification.
 
+The current implementation does not maintain a canonical beets catalogue, stable
+Master item rows, a disposable metadata index, or an Apple adapter. `doctor` still
+labels the optional `beet` executable as a canonical-catalogue tool; that label is
+legacy design residue rather than an implemented integration. The accepted future
+direction in `DESIGN.md` makes embedded file metadata authoritative, treats beets
+and Picard as optional preparation helpers, and keeps Apple publication as a
+replaceable projection.
+
 ## Derived data
 
 `.muse/muse.db` stores path, size, modification time, and SHA-256 for reusable

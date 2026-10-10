@@ -2,6 +2,8 @@
 
 Muse is a CLI for curating a canonical music archive and publishing selected music to Apple Music. The initial implementation is intentionally conservative: inspection is read-only, while reusable operational metadata is kept under `.muse/`.
 
+The music files are the durable product: canonical audio, intrinsic metadata, and primary artwork should remain self-contained and usable without Muse. Muse records workflow, provenance, integrity, and publication relationships without becoming a competing metadata catalogue. Apple is a replaceable listening projection and owns live playback behaviour. See [`DESIGN.md`](DESIGN.md) for the planned metadata-helper, cache, and Apple-adapter boundaries; those parts are not yet implemented.
+
 ## Design principles
 
 - Preserve source material. Destructive operations must be explicit, previewable, conservative, and recoverable.
