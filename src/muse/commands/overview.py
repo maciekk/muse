@@ -12,6 +12,7 @@ from typing import Any
 from rich.text import Text
 
 from muse.config import MANAGED_AREAS, MASTER_SHELVES, resolve_target
+from muse.registration import inspect_status as inspect_registration_status
 from muse.reporting import (
     emit_json,
     human_bytes,
@@ -134,13 +135,19 @@ def _status(args: argparse.Namespace, root: Path) -> int:
         check = _check(path)
         areas.append({"name": name, **check})
 
+    registration = inspect_registration_status(root)
     result = {
         "root": str(root),
         "root_status": root_state["status"],
         "areas": areas,
+        "registration": registration.to_dict(),
         "state_created": False,
     }
-    failed = root_state["status"] == "error" or any(area["status"] == "error" for area in areas)
+    failed = (
+        root_state["status"] == "error"
+        or any(area["status"] == "error" for area in areas)
+        or bool(registration.errors)
+    )
 
     if args.json:
         emit_json(result)
@@ -153,6 +160,33 @@ def _status(args: argparse.Namespace, root: Path) -> int:
             for area in areas
         ]
         print_table(console, ("AREA", "STATUS", "DETAIL", "PATH"), rows)
+        console.print("\n[bold]Master item registration[/bold]")
+        if registration.unregistered_files:
+            noun = "file" if registration.unregistered_files == 1 else "files"
+            console.print(
+                f"[yellow]{human_number(registration.unregistered_files)} Master audio "
+                f"{noun} {'does' if noun == 'file' else 'do'} not have durable item "
+                "identities.[/yellow]"
+            )
+            console.print("[yellow]Run `muse register` to review and register them.[/yellow]")
+        elif registration.master_audio_files:
+            noun = "file is" if registration.master_audio_files == 1 else "files are"
+            console.print(
+                f"[green]All {human_number(registration.master_audio_files)} Master audio "
+                f"{noun} registered.[/green]"
+            )
+        else:
+            console.print("[dim]No Master audio files found.[/dim]")
+        if registration.stale_item_paths:
+            console.print(
+                f"[yellow]{human_number(registration.stale_item_paths)} registered item paths "
+                "are missing from Master.[/yellow]"
+            )
+        if registration.errors:
+            error_console = make_console(args.color, stderr=True)
+            error_console.print("[bold red]Registration status errors[/bold red]")
+            for error in registration.errors:
+                error_console.print(f"  [red]{error}[/red]")
         console.print("[dim]Read-only inspection; no Muse state was created or changed.[/dim]")
 
     return 1 if failed else 0

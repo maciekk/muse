@@ -12,7 +12,7 @@ from typing import Any
 
 from mutagen import MutagenError
 
-from muse import cache
+from muse import cache, ledger
 from muse.filesystem import WalkError, walk
 from muse.hashing import sha256_file
 from muse.media import MediaInfo, MediaInspectionError, inspect_media
@@ -619,13 +619,24 @@ def apply_plan(root: Path, source: Path | None = None) -> ImportPlan:
         return _apply_plan(root, source)
 
 
-def _reconcile_cache(root: Path, source: Path, destination: Path) -> None:
+def _reconcile_cache(
+    root: Path,
+    source: Path,
+    destination: Path,
+    files: tuple[ImportFile, ...],
+) -> None:
+    """Record canonical item identity and reconcile reusable paths after a rename."""
     database = root / ".muse" / "muse.db"
-    if not database.exists():
-        return
+    database.parent.mkdir(parents=True, exist_ok=True)
+    admitted = []
+    for item in files:
+        path = destination if item.path == "." else destination / item.path
+        admitted.append((path.relative_to(root), item.size, item.sha256))
     with sqlite3.connect(database) as connection:
         cache.initialize_database(connection)
+        ledger.initialize_database(connection)
         cache.relocate(connection, source, destination)
+        ledger.admit(connection, admitted)
 
 
 def _apply_plan(root: Path, source: Path | None = None) -> ImportPlan:
@@ -671,7 +682,7 @@ def _apply_plan(root: Path, source: Path | None = None) -> ImportPlan:
         plan.accepted_inconsistent_album_artists,
     )
 
-    _reconcile_cache(root, source_path, destination)
+    _reconcile_cache(root, source_path, destination, plan.files)
     completed = replace(plan, state="completed")
     _write(path, completed)
     audit = root / ".muse" / "audit"

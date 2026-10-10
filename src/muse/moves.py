@@ -7,7 +7,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from muse import cache
+from muse import cache, ledger
 from muse.mutation import (
     atomic_json,
     checked_path,
@@ -24,12 +24,14 @@ class MoveResult:
     source: str
     destination: str
     cached_paths_updated: int
+    item_paths_updated: int
 
     def to_dict(self) -> dict[str, str | int]:
         return {
             "source": self.source,
             "destination": self.destination,
             "cached_paths_updated": self.cached_paths_updated,
+            "item_paths_updated": self.item_paths_updated,
         }
 
 
@@ -134,6 +136,16 @@ def _move(
                 "identity": _identity(source),
             }
         )
+        database = root / ".muse" / "muse.db"
+        if database.exists():
+            with sqlite3.connect(database) as connection:
+                ledger.initialize_database(connection)
+                for entry in entries:
+                    ledger.validate_relocation(
+                        connection,
+                        Path(entry["source"]).relative_to(root),
+                        Path(entry["destination"]).relative_to(root),
+                    )
         atomic_json(
             journal,
             {
@@ -152,13 +164,20 @@ def _move(
 
     database = root / ".muse" / "muse.db"
     updated = 0
+    items_updated = 0
     if database.exists():
         with sqlite3.connect(database) as connection:
             cache.initialize_database(connection)
+            ledger.initialize_database(connection)
             for entry in entries:
-                updated += cache.relocate(
-                    connection, Path(entry["source"]), Path(entry["destination"])
+                entry_source = Path(entry["source"])
+                entry_destination = Path(entry["destination"])
+                updated += cache.relocate(connection, entry_source, entry_destination)
+                items_updated += ledger.relocate(
+                    connection,
+                    entry_source.relative_to(root),
+                    entry_destination.relative_to(root),
                 )
     journal.unlink()
     sync_directory(journal.parent)
-    return MoveResult(str(source), str(destination), updated)
+    return MoveResult(str(source), str(destination), updated, items_updated)

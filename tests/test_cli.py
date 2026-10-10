@@ -1,10 +1,12 @@
 import json
+import sqlite3
 import subprocess
 from argparse import Namespace
 from pathlib import Path
 
 import pytest
 
+from muse import ledger, registration
 from muse.cli import main
 from muse.commands import content
 from muse.commands.compact import _compact_path_texts
@@ -57,6 +59,7 @@ def test_every_command_help_starts_with_a_summary(capsys) -> None:
         "compact": "Plan exact duplicate-tree compaction.",
         "help": "Show help for Muse or one command.",
         "import": "Strictly validate, plan, or apply a release or single import into master.",
+        "register": "Assign durable item identities to existing music in master.",
         "mv": "Move content and preserve cached hashes.",
         "slag": "Inspect or move non-audio backlog artifacts.",
     }
@@ -91,6 +94,49 @@ def test_status_json_reports_layout_without_creating_state(tmp_path: Path, capsy
     assert all(area["status"] == "ok" for area in report["areas"])
     assert report["state_created"] is False
     assert sorted(root.rglob("*")) == before
+
+
+def test_status_reports_unregistered_master_files_and_suggests_register(
+    tmp_path: Path, capsys
+) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    (root / "master" / "artists" / "old.flac").write_bytes(b"audio")
+
+    result = main(["--root", str(root), "--color", "never", "status"])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "1 Master audio file" in output
+    assert "muse register" in output
+
+    result = main(["--root", str(root), "status", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["registration"]["master_audio_files"] == 1
+    assert report["registration"]["registered_files"] == 0
+    assert report["registration"]["unregistered_files"] == 1
+    assert report["registration"]["unregistered_examples"] == ["master/artists/old.flac"]
+    assert report["state_created"] is False
+
+
+def test_status_reports_complete_master_item_registration(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    track = root / "master" / "artists" / "song.flac"
+    track.write_bytes(b"audio")
+    database = root / ".muse" / "muse.db"
+    database.parent.mkdir(exist_ok=True)
+    with sqlite3.connect(database) as connection:
+        ledger.initialize_database(connection)
+        ledger.admit(connection, [(track.relative_to(root), 5, "a" * 64)])
+
+    result = main(["--root", str(root), "--color", "never", "status"])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "All 1 Master audio file is registered" in output
+    assert "Run `muse register`" not in output
 
 
 def test_status_uses_semantic_color_when_forced(tmp_path: Path, capsys) -> None:
@@ -573,6 +619,35 @@ def test_import_plans_then_applies_audio_only_directory(
     assert report["action"] == "completed"
     assert not source.exists()
     assert (root / "master" / "games" / "new-album" / "song.flac").is_file()
+
+
+def test_register_previews_then_records_existing_master_items(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    root = tmp_path / "music-vault"
+    make_layout(root)
+    track = root / "master" / "artists" / "old.flac"
+    track.write_bytes(b"audio")
+    monkeypatch.setattr(registration, "inspect_media", lambda _path: None)
+
+    result = main(["--root", str(root), "register", "--json", "--progress", "never"])
+
+    preview = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert preview["action"] == "planned"
+    assert preview["files"][0]["path"] == "master/artists/old.flac"
+    assert not (root / ".muse" / "muse.db").exists()
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "REGISTER")
+    result = main(
+        ["--root", str(root), "register", "--apply", "--json", "--progress", "never"]
+    )
+
+    applied = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert applied["action"] == "completed"
+    assert applied["state"] == "completed"
+    assert (root / ".muse" / "muse.db").is_file()
 
 
 def test_mv_trailing_slash_places_album_inside_new_directory(tmp_path: Path, capsys) -> None:

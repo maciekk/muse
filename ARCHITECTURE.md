@@ -19,10 +19,12 @@ Rich.
 | Non-following filesystem inventory | `filesystem.py` |
 | Fresh SHA-256 and file identity | `hashing.py` |
 | SQLite hash cache schema and operations | `cache.py` |
+| Durable item identity and exact-version history | `ledger.py` |
 | Recursive tree fingerprint encoding | `trees.py` |
 | Duplicate and tree comparison workflows | `duplicates.py`, `tree_diff.py` |
 | External scan and backlog pull | `scanning.py` |
 | Media inspection and deterministic tag/artwork repair | `media.py`, `media_fixup.py` |
+| Existing-Master identity bootstrap | `registration.py` |
 | Import, compaction, move, and artifact workflows | `importing.py`, `compaction.py`, `moves.py`, `slag.py` |
 | Shared mutation mechanics | `mutation.py` |
 
@@ -31,23 +33,34 @@ exclusion, destination, and recovery policy. `filesystem.walk` reports errors an
 does not follow descendant directory symlinks. `trees.fingerprints` includes empty
 directories in the digest and is shared by duplicate discovery and verification.
 
-The current implementation does not maintain a canonical beets catalogue, stable
-Master item rows, a disposable metadata index, or an Apple adapter. `doctor` still
-labels the optional `beet` executable as a canonical-catalogue tool; that label is
-legacy design residue rather than an implemented integration. The accepted future
-direction in `DESIGN.md` makes embedded file metadata authoritative, treats beets
-and Picard as optional preparation helpers, and keeps Apple publication as a
-replaceable projection.
+The current implementation does not maintain a canonical beets catalogue, a
+disposable metadata index, or an Apple adapter. `doctor` still labels the optional
+`beet` executable as a canonical-catalogue tool; that label is legacy design residue
+rather than an implemented integration. The accepted future direction in
+`DESIGN.md` makes embedded file metadata authoritative, treats beets and Picard as
+optional preparation helpers, and keeps Apple publication as a replaceable
+projection.
 
 ## Derived data
 
-`.muse/muse.db` stores path, size, modification time, and SHA-256 for reusable
-vault hashes. `cache.py` owns its schema, lookup, pruning, and path relocation.
-Matching metadata permits cache reuse for duplicate reports, tree comparison,
-and thorough vault scanning; it is not proof of unchanged bytes. Import
-verification, verified copies, and external scan targets read content freshly.
-`--rehash` forces duplicate analysis to read files again. Mutations reconcile
-cached paths after content moves, and can repeat reconciliation during recovery.
+`.muse/muse.db` stores two distinct kinds of state. `file_hashes` contains path,
+size, modification time, and SHA-256 for reusable vault hashes. `cache.py` owns its
+schema, lookup, pruning, and path relocation. Matching metadata permits cache reuse
+for duplicate reports, tree comparison, and thorough vault scanning; it is not
+proof of unchanged bytes. Import verification, verified copies, and external scan
+targets read content freshly. `--rehash` forces duplicate analysis to read files
+again.
+
+`library_items` assigns a small stable ID to each audio file admitted by import, and
+`item_versions` records its admitted whole-file SHA-256. These rows are operational
+identity and version history, not a metadata catalogue; paths and hashes are
+references to the authoritative files. Import registration is idempotent during
+recovery. `mv` updates registered paths without changing IDs and refuses to move a
+registered item between lifecycle areas. Existing files that did not enter Master
+through the current importer are not silently adopted; `register` provides an
+explicit, fully validated and previewable bootstrap for them. `status` performs a
+read-only path comparison and reports unregistered Master audio and stale item
+paths without hashing or decoding files.
 
 ## Content mutations and recovery
 
@@ -61,8 +74,13 @@ plans and decide how to resume from verified filesystem state.
 - Import keeps one current plan under `.muse/imports/`. Planning may perform
   deterministic media repairs. Apply reverifies content, records the applying
   state, renames into `master/`, verifies the destination, reconciles cached paths,
-  and archives the plan under `.muse/audit/`. Retrying after a rename completes
-  these remaining steps.
+  registers durable items, and archives the plan under `.muse/audit/`. Retrying
+  after a rename completes these remaining steps.
+- Existing-Master registration keeps one plan at `.muse/register-plan.json`.
+  Planning fully validates and hashes unregistered audio without changing the
+  ledger. Apply checks that the audio path inventory is unchanged, fully reverifies
+  candidates, records stable item/version rows transactionally, and archives the
+  plan. A retry accepts matching rows committed before an interruption.
 - Compaction keeps a current plan at `.muse/compact-plan.json`. Current plans use
   metadata tree fingerprints for application checks; legacy plans can use content
   fingerprints. Before moving a duplicate tree, apply records a dated `trash/`

@@ -1,3 +1,4 @@
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -86,6 +87,22 @@ def test_plan_and_apply_audio_only_import(tmp_path: Path) -> None:
     assert plan.files[0].media.track_number == 1
     assert not plan_path(root, source).exists()
     assert list((root / ".muse" / "audit").glob("import-*.json"))
+    with sqlite3.connect(root / ".muse" / "muse.db") as connection:
+        items = connection.execute(
+            "SELECT id, area, path, current_sha256 FROM library_items ORDER BY path"
+        ).fetchall()
+        versions = connection.execute(
+            "SELECT item_id, sha256, size, reason FROM item_versions ORDER BY item_id"
+        ).fetchall()
+    assert [(row[1], row[2]) for row in items] == [
+        ("master", "master/games/album/01.flac"),
+        ("master", "master/games/album/02.flac"),
+    ]
+    assert [(row[0], row[1], row[3]) for row in versions] == [
+        (items[0][0], items[0][3], "import"),
+        (items[1][0], items[1][3], "import"),
+    ]
+    assert [row[2] for row in versions] == [item.size for item in plan.files]
 
 
 def test_import_trailing_slash_creates_directory_and_keeps_album_name(tmp_path: Path) -> None:

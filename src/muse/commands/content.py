@@ -328,6 +328,7 @@ def _move(args: argparse.Namespace, root: Path) -> int:
             f"[green]{args.command.capitalize()}d[/green] {result.source} → {result.destination}"
         )
         console.print(
-            f"[dim]Preserved {human_number(result.cached_paths_updated)} cached hash paths.[/dim]"
+            f"[dim]Preserved {human_number(result.cached_paths_updated)} cached hash paths "
+            f"and {human_number(result.item_paths_updated)} operational item paths.[/dim]"
         )
     return 0

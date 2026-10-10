@@ -17,6 +17,7 @@ from muse.commands.content import _import, _move, _slag
 from muse.commands.duplicates import _diff, _dupes, _prune
 from muse.commands.info import _info
 from muse.commands.overview import _doctor, _search, _stats, _status
+from muse.commands.register import _register
 from muse.commands.scan import _scan
 from muse.config import resolve_root
 from muse.reporting import (
@@ -279,6 +280,31 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     import_actions.add_argument("--abort", action="store_true", help="discard the current plan")
     _add_json_argument(import_command)
     import_command.set_defaults(handler=_import)
+
+    register = command(
+        "register", "assign durable item identities to existing music in master"
+    )
+    register.add_argument(
+        "target",
+        nargs="?",
+        help="file or directory beneath master (default: all of master)",
+    )
+    register_actions = register.add_mutually_exclusive_group()
+    register_actions.add_argument("--apply", action="store_true", help="apply the current plan")
+    register_actions.add_argument("--abort", action="store_true", help="discard the current plan")
+    register.add_argument(
+        "--all",
+        action="store_true",
+        help="show every file in the registration plan",
+    )
+    register.add_argument(
+        "--progress",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="validation progress display policy (default: auto)",
+    )
+    _add_json_argument(register)
+    register.set_defaults(handler=_register)
 
     relocation = command("mv", "move content and preserve cached hashes")
     relocation.add_argument("source", help="existing path beneath the library root")

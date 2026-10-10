@@ -66,6 +66,8 @@ muse check backlog          # fully decode audio recursively to find playback er
 muse check /media/old-drive/track.flac --json
 ```
 
+`status` compares audio paths in `master/` with the durable item ledger without reading audio contents or creating state. It reports unregistered Master files and suggests `muse register`; it also warns about registered item paths that are no longer present.
+
 `check` accepts one audio file or a directory. Relative targets use the current working
 directory, including paths outside the vault. It checks recognized audio extensions with
 FFmpeg, compares decoded length with the duration reported by FFprobe, and uses
@@ -189,10 +191,21 @@ muse compact backlog --prefer backlog/archive-a --prefer backlog/archive-b
 muse compact backlog --all            # show every move in the new plan
 muse compact --apply                  # reverify, confirm, and apply the plan
 
-muse mv old-path new-path             # move content and preserve cached hashes
+muse register                         # validate existing Master files and plan item registration
+muse register master/games/old-album  # limit the bootstrap to one Master path
+muse register --apply                 # reverify and create durable item identities
+muse register --abort                 # discard the current registration plan
+
+muse mv old-path new-path             # move content and preserve cached hashes and item IDs
 ```
 
 For `mv` and `import`, a destination ending in `/` names a directory. Muse creates it and any missing parents when applying the operation, then places the source file or directory inside it. For example, `muse mv backlog/albumA backlog/dest/dir/` results in `backlog/dest/dir/albumA`.
+
+#### Register existing Master files
+
+`register` is a one-time bootstrap for canonical audio that was already in `master/` before Muse began assigning operational item IDs. It scans all of `master/` by default or one explicitly selected path beneath it. Unregistered audio is probed, fully decoded, checked with the native FLAC verifier when available, and freshly SHA-256 hashed. Existing registered paths are skipped, ordinary non-audio release artifacts are counted but left alone, and traversal errors, symbolic links, unsupported media, missing required tags, or failed integrity checks block the plan.
+
+The default invocation writes a durable preview plan but does not create item rows or modify content. `--apply` inventories the scope again, fully reverifies every planned file, and then creates stable item and initial exact-version rows in `.muse/muse.db`; it never changes audio, tags, artwork, or paths. Application is idempotent after an interruption. Use `--all` to show every planned file and `--progress auto|always|never` to control validation progress. This command is a migration path for existing canonical content, not a replacement for normal validated import.
 
 #### Import
 
@@ -210,7 +223,7 @@ The `import` implementation accepts nonempty release directories and individual 
 
 Planning may perform the listed lossless tag and artwork fixups in `backlog/`; the preview reports each change. Muse permits at most one current import plan, so `muse import`, `muse import --apply`, and `muse import --abort` do not require its often-long source path. Only `--apply` moves the planned content into `master/`. When no destination is supplied and no plan exists, Muse suggests and records an `artists/<Album Artist>/...` destination from the tags: complete releases go directly below the artist, standalone singles below `singles/`, and album selections below `selections/`. Supplying a destination overrides that organization. For a file source, a destination without the source's audio extension is treated as a directory and the filename is appended. Missing destination directories are created during apply; an exact new filename with the same extension remains supported. Individually imported album selections retain positions such as `4/10` without requiring the other tracks; directory imports still require coherent, contiguous release numbering. This supports directory-wrapped singles, album selections, and independently imported singles grouped in a human-friendly directory. Nonempty JPEG, PNG, GIF, WebP, BMP, TIFF, AVIF, HEIF, and JPEG XL images are accepted by extension and preserved with their original bytes. Other non-audio artifacts remain blockers.
 
-If application stops after the rename, repeat `muse import --apply`. Muse verifies the content at its destination, updates cached paths, and archives the same plan. Planning and application hold a repository mutation lock; a concurrent mutation exits with an error.
+If application stops after the rename, repeat `muse import --apply`. Muse verifies the content at its destination, updates cached paths, and archives the same plan. Planning and application hold a repository mutation lock; a concurrent mutation exits with an error. Successful application also creates one durable operational item row per imported audio file and records its admitted SHA-256 version. These internal IDs preserve identity for later publication without becoming canonical metadata or being embedded in the file.
 
 #### Compaction
 
@@ -233,7 +246,7 @@ muse slag backlog/pc-2007 --thorough  # include artwork and release-adjacent fil
 `slag/` isolates non-music artifacts moved from backlog for later triage. It retains the original backlog-relative path so provenance remains visible.
 Copies are verified in a temporary file beside their final destination, then published before the backlog source is removed. An interrupted copy leaves the source available for a retry. An existing final destination is accepted only when its content matches the source.
 
-An interrupted `muse mv` can be retried with the same source and destination. Its operation record lets Muse finish companion slag moves and reconcile cached hash paths after a rename.
+An interrupted `muse mv` can be retried with the same source and destination. Its operation record lets Muse finish companion slag moves and reconcile cached hash paths and durable item paths after a rename. A plain move preserves a registered item's lifecycle area; moving it between `master/` and `stopgap/` requires a future explicit lifecycle operation.
 
 ## Terminal output
 

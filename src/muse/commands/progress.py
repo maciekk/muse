@@ -16,6 +16,7 @@ from rich.progress import (
 
 from muse.compaction import CompactProgress
 from muse.duplicates import ProgressUpdate
+from muse.registration import RegistrationProgress
 from muse.reporting import (
     human_bytes,
     human_number,
@@ -224,6 +225,42 @@ class _CompactProgressDisplay(_ProgressDisplay):
                 completed=update.completed_operations,
                 total=update.total_operations,
             )
+
+
+class _RegistrationProgressDisplay(_ProgressDisplay):
+    """File and byte progress for validating existing Master content."""
+
+    def __init__(self, mode: str, color: str, *, applying: bool = False) -> None:
+        self.applying = applying
+        super().__init__(
+            mode,
+            color,
+            TextColumn("{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+        )
+
+    def update(self, update: RegistrationProgress) -> None:
+        if update.complete:
+            self.stop()
+            return
+        predicted_long = update.total_bytes >= 1024**3 or update.total_files >= 100
+        if not self._start(predicted_long=predicted_long):
+            return
+        action = "Reverifying" if self.applying else "Validating"
+        description = (
+            f"{action} Master files — {human_number(update.completed_files)}/"
+            f"{human_number(update.total_files)}"
+        )
+        if self.task_id is None:
+            self.task_id = self.progress.add_task(description, total=max(update.total_bytes, 1))
+        self.progress.update(
+            self.task_id,
+            description=description,
+            completed=update.completed_bytes,
+            total=max(update.total_bytes, 1),
+        )
 
 
 class _SlagProgressDisplay(_ProgressDisplay):
