@@ -21,7 +21,7 @@ Rich.
 | SQLite hash cache schema and operations | `cache.py` |
 | Durable item identity and exact-version history | `ledger.py` |
 | Apple bridge documents and bundles | `apple_protocol.py`, `apple_exchange.py` |
-| Durable Apple library observations | `apple_ledger.py` |
+| Durable Apple observations and publication state | `apple_ledger.py` |
 | Read-only Apple status, macOS bridge, and test double | `commands/apple.py`, `apple_macos_bridge.py`, `apple_fake_bridge.py` |
 | Recursive tree fingerprint encoding | `trees.py` |
 | Duplicate and tree comparison workflows | `duplicates.py`, `tree_diff.py` |
@@ -109,8 +109,18 @@ paths without hashing or decoding files.
 including library and bridge identities, counts, capabilities, and observation time.
 A batch ID is immutable: an exact retry returns its existing row, while conflicting
 content is rejected. New batches append history so an unexpectedly empty or changed
-library cannot erase an earlier useful observation. Publication decisions, item
-mappings, and publication runs are not implemented yet.
+library cannot erase an earlier useful observation.
+
+`apple_publication_decisions` records explicit per-item inclusion or exclusion;
+absence remains unpublished by default. `apple_publication_runs` and
+`apple_publication_outcomes` bind immutable add-track requests to source and staging
+versions before exchange, then retain every success, failure, or uncertain result.
+Only explicitly included items at their current source version can enter a run, and
+lifecycle area determines the required managed playlist. Successful results establish
+an `apple_item_mappings` row keyed by durable item identity and scoped to the observed
+Music.app library. A new mapping starts with local-copy verification false because the
+protocol does not yet report Music.app's managed-media location. The publication
+planner and user-facing selection commands are not implemented yet.
 
 ## Content mutations and recovery
 
