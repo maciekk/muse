@@ -85,6 +85,7 @@ def test_play_prints_colored_control_cheatsheet(
             "quit",
         )
     )
+    assert error.index("←/→") < error.index("</>") < error.index("9/0") < error.index("quit")
 
 
 def test_play_requires_mpv(tmp_path: Path, monkeypatch, capsys) -> None:

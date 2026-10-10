@@ -48,8 +48,8 @@ def _print_controls(color: str, file_count: int) -> None:
     for key, action in (
         ("SPACE", "pause/resume"),
         ("←/→", "seek"),
-        ("9/0", "volume"),
         ("</>", "track"),
+        ("9/0", "volume"),
         ("q", "quit"),
     ):
         controls.append("  •  ", style="dim")
