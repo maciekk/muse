@@ -10,6 +10,7 @@ from functools import partial
 from rich_argparse import RichHelpFormatter
 
 from muse import __version__
+from muse.commands.apple import _apple_status
 from muse.commands.art import _fix_art
 from muse.commands.check import _check_audio
 from muse.commands.compact import _compact
@@ -105,6 +106,22 @@ def build_parser(color: str = "auto") -> argparse.ArgumentParser:
     status = command("status", "show top-level repository status")
     _add_json_argument(status)
     status.set_defaults(handler=_status)
+
+    apple_status = command(
+        "apple-status", "validate and show a returned Music.app observation"
+    )
+    apple_status.add_argument(
+        "request_bundle",
+        metavar="REQUEST",
+        help="inspection request bundle; relative paths use the current directory",
+    )
+    apple_status.add_argument(
+        "result_bundle",
+        metavar="RESULT",
+        help="returned result bundle; relative paths use the current directory",
+    )
+    _add_json_argument(apple_status)
+    apple_status.set_defaults(handler=_apple_status)
 
     stats = command("stats", "report file counts and disk usage")
     stats.add_argument(

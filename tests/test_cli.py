@@ -48,6 +48,7 @@ def test_every_command_help_starts_with_a_summary(capsys) -> None:
     summaries = {
         "doctor": "Inspect repository layout and supporting tools.",
         "status": "Show top-level repository status.",
+        "apple-status": "Validate and show a returned Music.app observation.",
         "stats": "Report file counts and disk usage.",
         "info": "Show album tracks, metadata, and possible gaps.",
         "scan": "Check whether an external tree contains files absent from the vault.",

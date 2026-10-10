@@ -56,6 +56,7 @@ These commands are read-only and do not create Muse state.
 ```bash
 muse doctor                 # inspect layout and supporting tools
 muse status                 # show top-level repository status
+muse apple-status REQUEST RESULT # validate a returned Music.app observation
 muse stats                  # count files and disk usage
 muse stats backlog          # inspect one path beneath the root
 muse stats --json           # emit structured output
@@ -109,9 +110,19 @@ muse-apple-bridge apply /path/to/inspection-request /path/to/inspection-result
 The helper uses `osascript` to read Music.app's version, library identity and name,
 total track count, and the combined size of the `Muse — Master` and
 `Muse — Stopgap` playlists. macOS may ask for Automation permission. The result is
-written as `inspection-result/result.json`; copy the result directory back intact
-for inspection. Reapplying the same request returns its journaled result without
-querying Music.app again. Bridge identity and operation outcomes are retained by
+written as `inspection-result/result.json`; copy the result directory back intact,
+then validate and display it together with the originating request:
+
+```bash
+muse apple-status /path/to/inspection-request /path/to/inspection-result
+muse apple-status /path/to/inspection-request /path/to/inspection-result --json
+```
+
+`apple-status` verifies the exact bundle inventories, staged-file hashes where
+present, protocol version, batch and operation identities, and canonical request
+digest before reporting the observation. It is read-only and does not require a
+library root. Reapplying the same request on the Mac returns its journaled result
+without querying Music.app again. Bridge identity and operation outcomes are retained by
 default under the current macOS user's Application Support directory. Use
 `--state PATH` after `apply` only for testing or an intentionally separate bridge
 identity.

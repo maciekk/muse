@@ -21,7 +21,7 @@ Rich.
 | SQLite hash cache schema and operations | `cache.py` |
 | Durable item identity and exact-version history | `ledger.py` |
 | Apple bridge documents and bundles | `apple_protocol.py`, `apple_exchange.py` |
-| Read-only macOS bridge and test double | `apple_macos_bridge.py`, `apple_fake_bridge.py` |
+| Read-only Apple status, macOS bridge, and test double | `commands/apple.py`, `apple_macos_bridge.py`, `apple_fake_bridge.py` |
 | Recursive tree fingerprint encoding | `trees.py` |
 | Duplicate and tree comparison workflows | `duplicates.py`, `tree_diff.py` |
 | External scan and backlog pull | `scanning.py` |
@@ -63,8 +63,10 @@ outcomes, and successful observations. Exact retries return the recorded result;
 an interrupted read-only observation may run again, while any future interrupted
 mutation defaults to an uncertain outcome rather than blind repetition. The
 bridge currently advertises only library inspection and performs no Music.app
-writes. `mutation.rename_exact` uses each supported platform's exclusive rename
-primitive so bundle publication works on both Linux and macOS.
+writes. `muse apple-status REQUEST RESULT` validates a returned bundle against its
+originating request and renders the observation without persisting state or needing
+a live Mac connection. `mutation.rename_exact` uses each supported platform's
+exclusive rename primitive so bundle publication works on both Linux and macOS.
 
 The current implementation does not maintain a canonical beets catalogue, a
 disposable metadata index, or an operational Apple adapter. `doctor` still labels

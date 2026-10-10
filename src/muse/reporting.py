@@ -77,9 +77,12 @@ def status_text(status: str) -> Text:
     styles = {
         "ok": "bold green",
         "available": "bold green",
+        "succeeded": "bold green",
         "warning": "bold yellow",
+        "uncertain": "bold yellow",
         "unavailable": "bold yellow",
         "error": "bold red",
+        "failed": "bold red",
     }
     return Text(status.upper(), style=styles.get(normalized, "bold"))
 
